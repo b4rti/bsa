@@ -80,7 +80,7 @@ fn print_help() {
     eprintln!("Usage:");
     eprintln!("  bsa ls <file.bsa>");
     eprintln!("  bsa cat <file.bsa> <path>");
-    eprintln!("  bsa extract <file.bsa>");
+    eprintln!("  bsa extract <file.bsa> [into/this/path]");
 }
 
 fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
@@ -89,11 +89,14 @@ fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
         print_help();
         return Ok(());
     }
-    match args[1].to_str() {
-        Some("ls") => ls(&args[2])?,
-        Some("cat") => cat(&args[2], args[3].to_str().unwrap())?,
-        Some("extract") => extract(&args[2], args.get(3).map(|s| s.as_os_str()))?,
-        _ => print_help()
+    let string_args: Vec<String> = env::args().collect();
+    let str_args: Vec<&str> = string_args.iter().map(|s| s.as_str()).collect();
+    match str_args.as_slice() {
+        ["ls", _] => ls(&args[2])?,
+        ["cat", _, _] => cat(&args[2], args[3].to_str().unwrap())?,
+        ["extract", _] => extract(&args[2], None)?,
+        ["extract", _, _] => extract(&args[2], Some(&args[3]))?,
+        _ => print_help(),
     }
     Ok(())
 }
