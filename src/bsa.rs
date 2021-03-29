@@ -204,17 +204,33 @@ impl FileFlags {
 }
 
 enum FileReader<'a> {
-    Raw(io::Take<&'a mut dyn Read>)
+    None,
+    Raw(&'a mut dyn Read)
 }
 
 pub struct File<'a> {
     name: Option<String>,
+    offset: u64,
+    size: u64,
+    compressed: bool,
     data: FileReader<'a>,
 }
 
-impl fmt::Debug for File<'_> {
+#[derive(Debug)]
+struct DataNotAvailable {}
+impl fmt::Display for DataNotAvailable {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "filename: {:?}", self.name)
+        write!(f, "Data is not available")
+    }
+}
+impl error::Error for DataNotAvailable {}
+
+impl<'a> Read for FileReader<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            FileReader::<'a>::None => Err(io::Error::new(io::ErrorKind::Other, DataNotAvailable {})),
+            FileReader::<'a>::Raw(r) => r.read(buf)
+        }
     }
 }
 
@@ -279,8 +295,6 @@ fn deserialize_bstring(bytes: &mut impl Read, zero: bool) -> Result<String, Read
     bytes.read_exact(&mut encoded_filename)?;
     let (decoded_name, _, errors) = encoding_rs::WINDOWS_1252.decode(&encoded_filename);
     if errors {
-        println!("{}", encoded_filename.iter().map(|b| char::from(*b)).collect::<String>());
-        println!("{:?}", &encoded_filename);
         return Err(ReadError::UndecodableCharacters);
     }
     if zero {
@@ -329,24 +343,24 @@ impl<'a> File<'a> {
         compressed: bool,
         size: u64,
         data: &'a mut (impl Read + Seek),
-    ) -> Result<FileInfo, ReadError> {
+    ) -> Result<File<'static>, ReadError> {
         let name = if archive_flags.embed_file_names {
             Some(deserialize_bstring(data, false)?)
         } else {
             None
         };
-        println!("{:?}", name);
         if compressed {
             let original_size = read_u32(data, Some(archive_flags))?;
             println!("size: {}, original_size: {}", size, original_size);
         }
         let data_size = if compressed { size + 4 } else { size };
         data.seek(io::SeekFrom::Current(data_size as i64))?;
-        Ok(FileInfo {
+        Ok(File {
             name,
             offset: data.stream_position()?,
             size: data_size,
             compressed,
+            data: FileReader::None,
         })
     }
 
@@ -357,19 +371,27 @@ impl<'a> File<'a> {
             None
         }
     }
+
+    pub fn contents(&mut self) -> &mut (impl Read + 'a) {
+        &mut self.data
+    }
 }
 
 #[derive(Debug)]
-pub struct Folder {
+pub struct Folder<'a> {
     name: Option<String>,
-    files: Vec<FileInfo>,
+    files: Vec<File<'a>>,
 }
 
-impl Folder {
-    pub fn files(&self) -> impl Iterator<Item = &FileInfo> {
+impl<'a> Folder<'a> {
+    pub fn files(&self) -> impl Iterator<Item = &File<'a>> {
         self.files.iter()
     }
 
+    pub fn files_mut(&mut self) -> impl Iterator<Item = &mut File<'a>> {
+        self.files.iter_mut()
+    }
+
     pub fn name(&self) -> Option<&str> {
         if let Some(name) = &self.name {
             Some(name.as_str())
@@ -379,31 +401,14 @@ impl Folder {
     }
 }
 
-pub struct FileInfo {
-    name: Option<String>,
-    offset: u64,
-    size: u64,
-    compressed: bool,
-}
-
-impl FileInfo {
-    pub fn name(&self) -> Option<&str> {
-        if let Some(name) = &self.name {
-            Some(name.as_str())
-        } else {
-            None
-        }
-    }
-}
-
-impl fmt::Debug for FileInfo {
+impl fmt::Debug for File<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "File {:?} (offset {}, size {}, compressed {})", self.name, self.offset, self.size, self.compressed)
     }
 }
 
 #[derive(Debug)]
-struct BsaHeader {
+struct BsaHeader<'a> {
     version: Version,
     archive_flags: ArchiveFlags,
     folder_count: u32,
@@ -411,15 +416,15 @@ struct BsaHeader {
     total_folder_name_length: u32,
     total_file_name_length: u32,
     file_flags: FileFlags,
-    folders: Vec<Folder>,
+    folders: Vec<Folder<'a>>,
 }
 
-pub struct Bsa<R: Read> {
-    header: BsaHeader,
+pub struct Bsa<'a, R: Read + 'a> {
+    header: BsaHeader<'a>,
     reader: R,
 }
 
-impl<R: Read> fmt::Debug for Bsa<R> {
+impl<R: Read> fmt::Debug for Bsa<'_, R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:#?}", self.header)
     }
@@ -445,12 +450,16 @@ struct FileRecord {
     name: Option<String>,
 }
 
-impl<R: Read + Seek> Bsa<R> {
-    pub fn folders(&self) -> impl Iterator<Item = &Folder> {
+impl<'a, R: Read + Seek + 'a> Bsa<'a, R> {
+    pub fn folders(&self) -> impl Iterator<Item = &Folder<'a>> {
         self.header.folders.iter()
     }
 
-    fn read_header(data: &mut R) -> Result<BsaHeader, ReadError> {
+    pub fn folders_mut(&mut self) -> impl Iterator<Item = &mut Folder<'a>> {
+        self.header.folders.iter_mut()
+    }
+
+    fn read_header(data: &mut R) -> Result<BsaHeader<'static>, ReadError> {
         let mut magic = [0; 4];
         data.read_exact(&mut magic)?;
         if &magic != b"BSA\0" {
@@ -552,7 +561,7 @@ impl<R: Read + Seek> Bsa<R> {
         Ok(res)
     }
 
-    pub fn read(mut data: R) -> Result<Bsa<R>, ReadError> {
+    pub fn read(mut data: R) -> Result<Bsa<'static, R>, ReadError> {
         let header = Self::read_header(&mut data)?;
         Ok(Bsa {
             header,
