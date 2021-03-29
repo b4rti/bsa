@@ -1,15 +1,18 @@
-use std::{error, fmt};
+#![allow(unused_imports, dead_code)]
 
-#[derive(Clone, Debug)]
+use std::{error, fmt, io::{self, Read, Seek, Write}};
+
+#[non_exhaustive]
+#[derive(Debug)]
 pub enum ReadError {
     MissingHeader,
     UnknownVersion(u32),
-    UnexpectedEOF,
     UnexpectedFolderRecordOffset,
     CompressionUnsupported,
     UndecodableCharacters,
     ExpectedNullByte,
     FailedToReadFileOffset,
+    ReaderError(io::Error)
 }
 
 impl fmt::Display for ReadError {
@@ -17,17 +20,29 @@ impl fmt::Display for ReadError {
         match self {
             Self::MissingHeader => write!(f, "BSA file header is missing or invalid"),
             Self::UnknownVersion(value) => write!(f, "Unknown BSA version: {}", value),
-            Self::UnexpectedEOF => write!(f, "Unexpected end of file"),
             Self::UnexpectedFolderRecordOffset => write!(f, "Unexpected folder record offset"),
             Self::CompressionUnsupported => write!(f, "Compression is not currently supported"),
             Self::UndecodableCharacters => write!(f, "Undecodable characters found"),
             Self::ExpectedNullByte => write!(f, "Expected a null byte"),
             Self::FailedToReadFileOffset => write!(f, "Failed to read file offset"),
+            Self::ReaderError(err) => write!(f, "{}", err),
         }
     }
 }
 
 impl error::Error for ReadError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            Self::ReaderError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<io::Error> for ReadError {
+    fn from(e: io::Error) -> Self {
+        Self::ReaderError(e)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -188,15 +203,18 @@ impl FileFlags {
     }
 }
 
-#[derive(Clone)]
+enum FileReader<'a> {
+    Raw(io::Take<&'a mut dyn Read>)
+}
+
 pub struct File<'a> {
     name: Option<String>,
-    data: &'a [u8],
+    data: FileReader<'a>,
 }
 
 impl fmt::Debug for File<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "filename: {:?}, size: {}", self.name, self.data.len())
+        write!(f, "filename: {:?}", self.name)
     }
 }
 
@@ -223,97 +241,169 @@ fn serialize_bstring(s: &str, zero: bool, vec: &mut Vec<u8>) -> Result<(), Write
     Ok(())
 }
 
-// returns (resulting string, bytes read)
-fn deserialize_bstring(bytes: &[u8], zero: bool) -> Result<(String, usize), ReadError> {
-    let name_length = if zero {
-        bytes[0] as usize - 1
+fn read_u8(reader: &mut impl Read) -> Result<u8, ReadError> {
+    let mut buf = [0];
+    reader.read_exact(&mut buf)?;
+    Ok(buf[0])
+}
+
+fn read_u32(reader: &mut impl Read, archive_flags: Option<ArchiveFlags>) -> Result<u32, ReadError> {
+    let mut buf = [0; 4];
+    reader.read_exact(&mut buf)?;
+    if archive_flags.is_some() && archive_flags.unwrap().xbox360_archive {
+        Ok(u32::from_be_bytes(buf))
     } else {
-        bytes[0] as usize
+        Ok(u32::from_le_bytes(buf))
+    }
+}
+
+fn read_u64(reader: &mut impl Read, archive_flags: Option<ArchiveFlags>) -> Result<u64, ReadError> {
+    let mut buf = [0; 8];
+    reader.read_exact(&mut buf)?;
+    if archive_flags.is_some() && archive_flags.unwrap().xbox360_archive {
+        Ok(u64::from_be_bytes(buf))
+    } else {
+        Ok(u64::from_le_bytes(buf))
+    }
+}
+
+fn deserialize_bstring(bytes: &mut impl Read, zero: bool) -> Result<String, ReadError> {
+    let length_byte = read_u8(bytes)?;
+    let name_length = if zero {
+        length_byte as usize - 1
+    } else {
+        length_byte as usize
     };
-    let encoded_filename = &bytes[1..(name_length + 1)];
-    let (decoded_name, _, errors) = encoding_rs::WINDOWS_1252.decode(encoded_filename);
+    let mut encoded_filename = Vec::with_capacity(name_length);
+    encoded_filename.resize(name_length, 0);
+    bytes.read_exact(&mut encoded_filename)?;
+    let (decoded_name, _, errors) = encoding_rs::WINDOWS_1252.decode(&encoded_filename);
     if errors {
+        println!("{}", encoded_filename.iter().map(|b| char::from(*b)).collect::<String>());
+        println!("{:?}", &encoded_filename);
         return Err(ReadError::UndecodableCharacters);
     }
     if zero {
-        if bytes[name_length + 1] != 0 {
+        let null_byte = read_u8(bytes)?;
+        if null_byte != 0 {
             return Err(ReadError::ExpectedNullByte)
         }
     }
-    Ok((decoded_name.into_owned(), 1 + name_length + if zero { 1 } else { 0 }))
+    Ok(decoded_name.into_owned())
 }
 
-// returns (resulting string, bytes read)
-fn deserialize_null_terminated_string(bytes: &[u8]) -> Result<(String, usize), ReadError> {
-    let mut name_length = None;
-    for i in 0..bytes.len() {
-        if bytes[i] == 0 {
-            name_length = Some(i);
+fn deserialize_null_terminated_string(bytes: &mut impl Read) -> Result<String, ReadError> {
+    let mut encoded_filename = vec![];
+    loop {
+        let byte = read_u8(bytes)?;
+        if byte == 0 {
             break;
         }
+        encoded_filename.push(byte);
     }
-    if let Some(name_length) = name_length {
-        let encoded_filename = &bytes[..name_length];
-        let (decoded_name, _, errors) = encoding_rs::WINDOWS_1252.decode(encoded_filename);
-        if errors {
-            return Err(ReadError::UndecodableCharacters);
-        }
-        Ok((decoded_name.into_owned(), 1 + name_length))
-    } else {
-        Err(ReadError::ExpectedNullByte)
+    let (decoded_name, _, errors) = encoding_rs::WINDOWS_1252.decode(&encoded_filename);
+    if errors {
+        return Err(ReadError::UndecodableCharacters);
     }
+    Ok(decoded_name.into_owned())
 }
 
 impl<'a> File<'a> {
-    fn serialize(&self, archive_flags: ArchiveFlags, compress: bool) -> Result<Vec<u8>, WriteError> {
-        if compress {
-            return Err(WriteError::CompressionUnsupported)
-        }
-        let mut res = vec![];
-        if archive_flags.embed_file_names {
-            if let Some(name) = &self.name {
-                serialize_bstring(&name, false, &mut res)?;
-            } else {
-                return Err(WriteError::MissingFileName);
-            }
-        }
-        for b in self.data {
-            res.push(*b);
-        }
-        Ok(res)
-    }
+    // fn serialize(&self, archive_flags: ArchiveFlags, compress: bool) -> Result<io::Chain<&[u8], &mut R>, WriteError> {
+    //     if compress {
+    //         return Err(WriteError::CompressionUnsupported)
+    //     }
+    //     let mut res = vec![];
+    //     if archive_flags.embed_file_names {
+    //         if let Some(name) = &self.name {
+    //             serialize_bstring(&name, false, &mut res)?;
+    //         } else {
+    //             return Err(WriteError::MissingFileName);
+    //         }
+    //     }
+    //     Ok(res.chain(&mut self.data))
+    // }
 
     fn deserialize(
         archive_flags: ArchiveFlags,
-        compress: bool,
-        size: usize,
-        mut data: &'a [u8]
-    ) -> Result<(Self, &[u8]), ReadError> {
-        if compress {
-            return Err(ReadError::CompressionUnsupported);
-        }
+        compressed: bool,
+        size: u64,
+        data: &'a mut (impl Read + Seek),
+    ) -> Result<FileInfo, ReadError> {
         let name = if archive_flags.embed_file_names {
-            let (name, bytes_read) = deserialize_bstring(data, false)?;
-            data = &data[bytes_read..];
-            Some(name)
+            Some(deserialize_bstring(data, false)?)
         } else {
             None
         };
-        Ok((Self {
+        println!("{:?}", name);
+        if compressed {
+            let original_size = read_u32(data, Some(archive_flags))?;
+            println!("size: {}, original_size: {}", size, original_size);
+        }
+        let data_size = if compressed { size + 4 } else { size };
+        data.seek(io::SeekFrom::Current(data_size as i64))?;
+        Ok(FileInfo {
             name,
-            data: &data[..size]
-        }, &data[size..]))
+            offset: data.stream_position()?,
+            size: data_size,
+            compressed,
+        })
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        if let Some(name) = &self.name {
+            Some(name.as_str())
+        } else {
+            None
+        }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Folder<'a> {
+#[derive(Debug)]
+pub struct Folder {
     name: Option<String>,
-    files: Vec<File<'a>>,
+    files: Vec<FileInfo>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Bsa<'a> {
+impl Folder {
+    pub fn files(&self) -> impl Iterator<Item = &FileInfo> {
+        self.files.iter()
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        if let Some(name) = &self.name {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    }
+}
+
+pub struct FileInfo {
+    name: Option<String>,
+    offset: u64,
+    size: u64,
+    compressed: bool,
+}
+
+impl FileInfo {
+    pub fn name(&self) -> Option<&str> {
+        if let Some(name) = &self.name {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    }
+}
+
+impl fmt::Debug for FileInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "File {:?} (offset {}, size {}, compressed {})", self.name, self.offset, self.size, self.compressed)
+    }
+}
+
+#[derive(Debug)]
+struct BsaHeader {
     version: Version,
     archive_flags: ArchiveFlags,
     folder_count: u32,
@@ -321,7 +411,18 @@ pub struct Bsa<'a> {
     total_folder_name_length: u32,
     total_file_name_length: u32,
     file_flags: FileFlags,
-    folders: Vec<Folder<'a>>,
+    folders: Vec<Folder>,
+}
+
+pub struct Bsa<R: Read> {
+    header: BsaHeader,
+    reader: R,
+}
+
+impl<R: Read> fmt::Debug for Bsa<R> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:#?}", self.header)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -344,58 +445,33 @@ struct FileRecord {
     name: Option<String>,
 }
 
-impl<'a> Bsa<'a> {
-    pub fn folders(&self) -> &[Folder] {
-        &self.folders
+impl<R: Read + Seek> Bsa<R> {
+    pub fn folders(&self) -> impl Iterator<Item = &Folder> {
+        self.header.folders.iter()
     }
 
-    fn read_u32(data: &[u8], archive_flags: Option<ArchiveFlags>) -> Result<(u32, &[u8]), ReadError> {
-        if data.len() < 4 {
-            Err(ReadError::UnexpectedEOF)
-        } else {
-            let bytes = [data[0], data[1], data[2], data[3]];
-            if archive_flags.is_some() && archive_flags.unwrap().xbox360_archive {
-                Ok((u32::from_be_bytes(bytes), &data[4..]))
-            } else {
-                Ok((u32::from_le_bytes(bytes), &data[4..]))
-            }
-        }
-    }
-
-    fn read_u64(data: &[u8], archive_flags: Option<ArchiveFlags>) -> Result<(u64, &[u8]), ReadError> {
-        if data.len() < 8 {
-            Err(ReadError::UnexpectedEOF)
-        } else {
-            let bytes = [data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]];
-            if archive_flags.is_some() && archive_flags.unwrap().xbox360_archive {
-                Ok((u64::from_be_bytes(bytes), &data[8..]))
-            } else {
-                Ok((u64::from_le_bytes(bytes), &data[8..]))
-            }
-        }
-    }
-
-    fn read_header(mut data: &[u8]) -> Result<(Bsa<'static>, &[u8]), ReadError> {
-        if &data[0..4] != b"BSA\0" {
+    fn read_header(data: &mut R) -> Result<BsaHeader, ReadError> {
+        let mut magic = [0; 4];
+        data.read_exact(&mut magic)?;
+        if &magic != b"BSA\0" {
             return Err(ReadError::MissingHeader)
-        } else {
-            data = &data[4..];
         }
-        let (version_num, data) = Self::read_u32(data, None)?;
+        let version_num = read_u32(data, None)?;
         let version = Version::deserialize(version_num)?;
-        let (offset, data) = Self::read_u32(data, None)?;
+        let offset = read_u32(data, None)?;
         if offset != 36 {
             return Err(ReadError::UnexpectedFolderRecordOffset);
         }
-        let (archive_flags_u64, data) = Self::read_u32(data, None)?;
+        let archive_flags_u64 = read_u32(data, None)?;
         let archive_flags = ArchiveFlags::deserialize(archive_flags_u64);
-        let (folder_count, data) = Self::read_u32(data, Some(archive_flags))?;
-        let (file_count, data) = Self::read_u32(data, Some(archive_flags))?;
-        let (total_folder_name_length, data) = Self::read_u32(data, Some(archive_flags))?;
-        let (total_file_name_length, data) = Self::read_u32(data, Some(archive_flags))?;
-        let (file_flags_u64, data) = Self::read_u32(data, None)?;
+        let folder_count = read_u32(data, Some(archive_flags))?;
+        let file_count = read_u32(data, Some(archive_flags))?;
+        let total_folder_name_length = read_u32(data, Some(archive_flags))?;
+        let total_file_name_length = read_u32(data, Some(archive_flags))?;
+        let file_flags_u64 = read_u32(data, None)?;
         let file_flags = FileFlags::deserialize(file_flags_u64);
-        Ok((Bsa {
+
+        let mut res = BsaHeader {
             version,
             archive_flags,
             folder_count,
@@ -404,26 +480,17 @@ impl<'a> Bsa<'a> {
             total_file_name_length,
             file_flags,
             folders: vec![],
-        }, data))
-    }
-
-    pub fn read(data: &'a [u8]) -> Result<Self, ReadError> {
-        let (mut res, mut data) = Self::read_header(data)?;
+        };
 
         // read folder records
         let mut folder_records = vec![];
         for _ in 0..res.folder_count {
-            let (name_hash, remaining) = Self::read_u64(data, Some(res.archive_flags))?;
-            let (file_count, remaining) = Self::read_u32(remaining, Some(res.archive_flags))?;
-            let (old_file_offset, remaining) = Self::read_u32(remaining, Some(res.archive_flags))?;
-            data = remaining;
+            let name_hash = read_u64(data, Some(res.archive_flags))?;
+            let file_count = read_u32(data, Some(res.archive_flags))?;
+            let old_file_offset = read_u32(data, Some(res.archive_flags))?;
             let offset = match res.version {
                 Version::Skyrim => u64::from(old_file_offset),
-                Version::SkyrimSpecialEdition => {
-                    let (offset, remaining) = Self::read_u64(data, Some(res.archive_flags))?;
-                    data = remaining;
-                    offset
-                }
+                Version::SkyrimSpecialEdition => read_u64(data, Some(res.archive_flags))?,
                 _ => return Err(ReadError::FailedToReadFileOffset),
             };
             folder_records.push(FolderRecord {
@@ -438,21 +505,19 @@ impl<'a> Bsa<'a> {
         // read file record blocks
         for folder_record in &mut folder_records {
             if res.archive_flags.include_directory_names {
-                let (name, len) = deserialize_bstring(data, true)?;
+                let name = deserialize_bstring(data, true)?;
                 folder_record.name = Some(name);
-                data = &data[len..];
             }
             for _ in 0..folder_record.file_count {
-                let (name_hash, remaining) = Self::read_u64(data, Some(res.archive_flags))?;
-                let (size, remaining) = Self::read_u32(remaining, Some(res.archive_flags))?;
-                let (offset, remaining) = Self::read_u32(remaining, Some(res.archive_flags))?;
+                let name_hash = read_u64(data, Some(res.archive_flags))?;
+                let size = read_u32(data, Some(res.archive_flags))?;
+                let offset = read_u32(data, Some(res.archive_flags))?;
                 folder_record.file_records.push(FileRecord {
                     name_hash,
                     size,
                     offset,
                     name: None,
                 });
-                data = remaining;
             }
         }
 
@@ -460,8 +525,7 @@ impl<'a> Bsa<'a> {
             // read file name block
             for folder_record in &mut folder_records {
                 for file_record in &mut folder_record.file_records {
-                    let (file_name, bytes_read) = deserialize_null_terminated_string(data)?;
-                    data = &data[bytes_read..];
+                    let file_name = deserialize_null_terminated_string(data)?;
                     file_record.name = Some(file_name);
                 }
             }
@@ -473,17 +537,27 @@ impl<'a> Bsa<'a> {
                 files: vec![],
             };
             for file_record in folder_record.file_records {
-                let (mut file, remaining) = File::deserialize(res.archive_flags, false, file_record.size as usize, data)?;
+                let override_compressed = if file_record.size & 0x40000000 != 0 { true } else { false };
+                let compressed = archive_flags.compressed_archive != override_compressed;
+
+                let mut file = File::deserialize(res.archive_flags, compressed, file_record.size.into(), data)?;
                 if file.name.is_none() && file_record.name.is_some() {
                     file.name = file_record.name;
                 }
                 folder.files.push(file);
-                data = remaining;
             }
             res.folders.push(folder);
         }
 
         Ok(res)
+    }
+
+    pub fn read(mut data: R) -> Result<Bsa<R>, ReadError> {
+        let header = Self::read_header(&mut data)?;
+        Ok(Bsa {
+            header,
+            reader: data
+        })
     }
 
     fn write_u32(v: &mut Vec<u8>, value: u32, archive_flags: Option<ArchiveFlags>) {
@@ -497,15 +571,15 @@ impl<'a> Bsa<'a> {
         }
     }
 
-    pub fn write(&self) -> Vec<u8> {
-        let mut res = vec![b'B', b'S', b'A', 0x00];
-        Self::write_u32(&mut res, self.version.serialize(), None);
-        Self::write_u32(&mut res, self.archive_flags.serialize(), None);
-        Self::write_u32(&mut res, self.folder_count, Some(self.archive_flags));
-        Self::write_u32(&mut res, self.file_count, Some(self.archive_flags));
-        Self::write_u32(&mut res, self.total_folder_name_length, Some(self.archive_flags));
-        Self::write_u32(&mut res, self.total_file_name_length, Some(self.archive_flags));
-        Self::write_u32(&mut res, self.file_flags.serialize(), Some(self.archive_flags));
-        res
-    }
+    // pub fn write(&self) -> Vec<u8> {
+    //     let mut res = vec![b'B', b'S', b'A', 0x00];
+    //     Self::write_u32(&mut res, self.version.serialize(), None);
+    //     Self::write_u32(&mut res, self.archive_flags.serialize(), None);
+    //     Self::write_u32(&mut res, self.folder_count, Some(self.archive_flags));
+    //     Self::write_u32(&mut res, self.file_count, Some(self.archive_flags));
+    //     Self::write_u32(&mut res, self.total_folder_name_length, Some(self.archive_flags));
+    //     Self::write_u32(&mut res, self.total_file_name_length, Some(self.archive_flags));
+    //     Self::write_u32(&mut res, self.file_flags.serialize(), Some(self.archive_flags));
+    //     res
+    // }
 }

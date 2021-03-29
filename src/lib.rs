@@ -1,6 +1,6 @@
 mod bsa;
 
-pub use bsa::Bsa;
+pub use bsa::{Bsa, ReadError};
 
 #[cfg(test)]
 mod tests {
