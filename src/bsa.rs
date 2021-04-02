@@ -1,6 +1,7 @@
 #![allow(unused_imports, dead_code)]
 
 use std::{error, fmt, io::{self, Read, Seek, Write}};
+use crate::cp1252;
 
 #[non_exhaustive]
 #[derive(Debug)]
@@ -9,7 +10,6 @@ pub enum ReadError {
     UnknownVersion(u32),
     UnexpectedFolderRecordOffset,
     CompressionUnsupported,
-    UndecodableCharacters,
     ExpectedNullByte,
     FailedToReadFileOffset,
     ReaderError(io::Error)
@@ -22,7 +22,6 @@ impl fmt::Display for ReadError {
             Self::UnknownVersion(value) => write!(f, "Unknown BSA version: {}", value),
             Self::UnexpectedFolderRecordOffset => write!(f, "Unexpected folder record offset"),
             Self::CompressionUnsupported => write!(f, "Compression is not currently supported"),
-            Self::UndecodableCharacters => write!(f, "Undecodable characters found"),
             Self::ExpectedNullByte => write!(f, "Expected a null byte"),
             Self::FailedToReadFileOffset => write!(f, "Failed to read file offset"),
             Self::ReaderError(err) => write!(f, "{}", err),
@@ -47,7 +46,7 @@ impl From<io::Error> for ReadError {
 
 #[derive(Clone, Debug)]
 pub enum WriteError {
-    UnencodableCharacters,
+    UnencodableCharacters(cp1252::EncodingError),
     FileNameMoreThan255Characters,
     CompressionUnsupported,
     MissingFileName,
@@ -56,7 +55,7 @@ pub enum WriteError {
 impl fmt::Display for WriteError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::UnencodableCharacters => write!(f, "Unencodable characters found"),
+            Self::UnencodableCharacters(_) => write!(f, "Unencodable characters found"),
             Self::CompressionUnsupported => write!(f, "Compression is not currently supported"),
             Self::FileNameMoreThan255Characters => write!(f, "File name is longer than 255 characters"),
             Self::MissingFileName => write!(f, "Missing file name"),
@@ -65,6 +64,12 @@ impl fmt::Display for WriteError {
 }
 
 impl error::Error for WriteError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            Self::UnencodableCharacters(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -212,24 +217,27 @@ pub struct File {
 }
 
 fn serialize_bstring(s: &str, zero: bool, vec: &mut Vec<u8>) -> Result<(), WriteError> {
-    let (encoded_str, _, errors) = encoding_rs::WINDOWS_1252.encode(s);
+    let mut encoded_str = vec![];
+    for ch in s.chars() {
+        match cp1252::encode_char(ch) {
+            Ok(byte) => encoded_str.push(byte),
+            Err(e) => return Err(WriteError::UnencodableCharacters(e)),
+        }
+    }
     let length = if zero {
-        encoded_str.as_ref().len() + 1
+        encoded_str.len() + 1
     } else {
-        encoded_str.as_ref().len()
+        encoded_str.len()
     };
     if length > 255 {
         return Err(WriteError::FileNameMoreThan255Characters);
     }
     vec.push(length as u8);
-    for b in encoded_str.as_ref() {
-        vec.push(*b);
+    for b in encoded_str {
+        vec.push(b);
     }
     if zero {
         vec.push(0);
-    }
-    if errors {
-        return Err(WriteError::UnencodableCharacters);
     }
     Ok(())
 }
@@ -270,9 +278,9 @@ fn deserialize_bstring(bytes: &mut impl Read, zero: bool) -> Result<String, Read
     let mut encoded_filename = Vec::with_capacity(name_length);
     encoded_filename.resize(name_length, 0);
     bytes.read_exact(&mut encoded_filename)?;
-    let (decoded_name, _, errors) = encoding_rs::WINDOWS_1252.decode(&encoded_filename);
-    if errors {
-        return Err(ReadError::UndecodableCharacters);
+    let mut decoded_name = String::new();
+    for byte in encoded_filename {
+        decoded_name.push(cp1252::decode_byte(byte));
     }
     if zero {
         let null_byte = read_u8(bytes)?;
@@ -280,7 +288,7 @@ fn deserialize_bstring(bytes: &mut impl Read, zero: bool) -> Result<String, Read
             return Err(ReadError::ExpectedNullByte)
         }
     }
-    Ok(decoded_name.into_owned())
+    Ok(decoded_name)
 }
 
 fn deserialize_null_terminated_string(bytes: &mut impl Read) -> Result<String, ReadError> {
@@ -292,11 +300,11 @@ fn deserialize_null_terminated_string(bytes: &mut impl Read) -> Result<String, R
         }
         encoded_filename.push(byte);
     }
-    let (decoded_name, _, errors) = encoding_rs::WINDOWS_1252.decode(&encoded_filename);
-    if errors {
-        return Err(ReadError::UndecodableCharacters);
+    let mut decoded_name = String::new();
+    for byte in encoded_filename {
+        decoded_name.push(cp1252::decode_byte(byte));
     }
-    Ok(decoded_name.into_owned())
+    Ok(decoded_name)
 }
 
 pub struct FileReader<R: Read> {
