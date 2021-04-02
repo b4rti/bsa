@@ -3,6 +3,7 @@ use std::{error, fs, io, path};
 use structopt::StructOpt;
 
 mod bsa;
+mod cp1252;
 
 fn ls(file: &Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let file = fs::File::open(file)?;

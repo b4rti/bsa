@@ -1,4 +1,5 @@
 mod bsa;
+mod cp1252;
 
 pub use bsa::{Bsa, ReadError};
 
