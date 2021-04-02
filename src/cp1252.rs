@@ -1,12 +1,15 @@
-use std::{array, convert::TryFrom, error, fmt};
-
+use std::{array, convert, error, fmt};
 
 #[derive(Clone, Copy, Debug)]
 pub struct EncodingError(char);
 
 impl fmt::Display for EncodingError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Unable to encode character {} using the Windows-1252 encoding", self.0)
+        write!(
+            f,
+            "Unable to encode character {} using the Windows-1252 encoding",
+            self.0
+        )
     }
 }
 
@@ -30,7 +33,7 @@ pub fn decode_byte(b: u8) -> char {
     if b <= 0x7f {
         char::from(b)
     } else {
-        char::try_from(CP1252_VALUES[usize::from(b) - 0x80].1).unwrap()
+        <char as convert::TryFrom<u32>>::try_from(CP1252_VALUES[usize::from(b) - 0x80].1).unwrap()
     }
 }
 
