@@ -1,8 +1,10 @@
-use std::{env, error, ffi, fs, io, path};
+use std::path::{Path, PathBuf};
+use std::{error, fs, io, path};
+use structopt::StructOpt;
 
 mod bsa;
 
-fn ls(file: &ffi::OsStr) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn ls(file: &Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let file = fs::File::open(file)?;
     let bsa = bsa::Bsa::read(file)?;
     for folder in bsa.folders() {
@@ -17,7 +19,7 @@ fn ls(file: &ffi::OsStr) -> Result<(), Box<dyn error::Error + Send + Sync + 'sta
     Ok(())
 }
 
-fn cat(bsa_file: &ffi::OsStr, path: &str) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn cat(bsa_file: &Path, path: &str) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let path = if path.find('/').is_some() {
         path.replace('/', "\\")
     } else {
@@ -34,18 +36,26 @@ fn cat(bsa_file: &ffi::OsStr, path: &str) -> Result<(), Box<dyn error::Error + S
                     if path == combined_name {
                         io::copy(
                             &mut file.clone().read_contents(&mut bsa)?,
-                            &mut io::stdout().lock())?;
+                            &mut io::stdout().lock(),
+                        )?;
                         return Ok(());
                     }
                 }
             }
         }
     }
-    eprintln!("File {} does not exist in {}", path, bsa_file.to_string_lossy());
+    eprintln!(
+        "File {} does not exist in {}",
+        path,
+        bsa_file.to_string_lossy()
+    );
     Ok(())
 }
 
-fn extract(bsa_file: &ffi::OsStr, into: Option<&ffi::OsStr>) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn extract(
+    bsa_file: &Path,
+    into: Option<&Path>,
+) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let file = fs::File::open(bsa_file)?;
     let mut bsa = bsa::Bsa::read(file)?;
     for folder in bsa.folders() {
@@ -66,9 +76,7 @@ fn extract(bsa_file: &ffi::OsStr, into: Option<&ffi::OsStr>) -> Result<(), Box<d
                     file_path.push(file_name);
                     let mut output_file = fs::File::create(&file_path)?;
                     println!("Creating {:?}", &file_path);
-                    io::copy(
-                        &mut file.clone().read_contents(&mut bsa)?,
-                        &mut output_file)?;
+                    io::copy(&mut file.clone().read_contents(&mut bsa)?, &mut output_file)?;
                 }
             }
         }
@@ -76,29 +84,43 @@ fn extract(bsa_file: &ffi::OsStr, into: Option<&ffi::OsStr>) -> Result<(), Box<d
     Ok(())
 }
 
-fn print_help() {
-    eprintln!("Usage:");
-    eprintln!("  bsa ls <file.bsa>");
-    eprintln!("  bsa cat <file.bsa> <path>");
-    eprintln!("  bsa extract <file.bsa> [into/this/path]");
-}
-
 fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
-    let args: Vec<_> = env::args_os().collect();
-    if args.len() < 2 {
-        print_help();
-        return Ok(());
-    }
-    let string_args: Vec<String> = env::args().collect();
-    let str_args: Vec<&str> = string_args.iter().map(|s| s.as_str()).collect();
-    match str_args.as_slice() {
-        ["ls", _] => ls(&args[2])?,
-        ["cat", _, _] => cat(&args[2], args[3].to_str().unwrap())?,
-        ["extract", _] => extract(&args[2], None)?,
-        ["extract", _, _] => extract(&args[2], Some(&args[3]))?,
-        _ => print_help(),
+    let args = Cli::from_args();
+    match args {
+        Cli::Ls { file } => ls(&file)?,
+        Cli::Cat { file, path } => cat(&file, &path)?,
+        Cli::Extract { file, into } => {
+            if let Some(into) = into {
+                extract(&file, Some(&into))?
+            } else {
+                extract(&file, None)?
+            }
+        }
     }
     Ok(())
+}
+
+#[derive(StructOpt, Debug)]
+enum Cli {
+    Ls {
+        /// Input file
+        #[structopt(parse(from_os_str))]
+        file: PathBuf,
+    },
+    Cat {
+        /// Input file
+        #[structopt(parse(from_os_str))]
+        file: PathBuf,
+        /// Path to file in the bsa
+        path: String,
+    },
+    Extract {
+        /// Input file
+        #[structopt(parse(from_os_str))]
+        file: PathBuf,
+        #[structopt(parse(from_os_str), long = "into")]
+        into: Option<PathBuf>,
+    },
 }
 
 fn main() {
