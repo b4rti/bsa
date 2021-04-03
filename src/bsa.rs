@@ -505,7 +505,8 @@ fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
         if name.is_empty() { 0x00 } else { name[name.len() - 1] },
         if name.len() < 3 { 0x00 } else { name[name.len() - 2] },
         name.len() as u8,
-        name[0]
+        // not sure about this extra check
+        if name.is_empty() { 0x00 } else { name[0] },
     ];
     let mut hash1 = u32::from_le_bytes(hash_bytes);
     match ext.as_slice() {
@@ -516,8 +517,11 @@ fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
         _ => (),
     }
     let mut hash2 = 0_u32;
-    for &n in &name[1..name.len() - 2] {
-        hash2 = hash2.wrapping_mul(0x1003f).wrapping_add(u32::from(n));
+    // not sure about this extra check
+    if name.len() >= 3 {
+        for &n in &name[1..name.len() - 2] {
+            hash2 = hash2.wrapping_mul(0x1003f).wrapping_add(u32::from(n));
+        }
     }
     let mut hash3 = 0_u32;
     for &n in ext.as_slice() {
