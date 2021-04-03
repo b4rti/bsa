@@ -2,6 +2,7 @@
 
 use std::{error, fmt, io::{self, Read, Seek, Write}};
 use crate::cp1252;
+use lz4_flex;
 
 #[non_exhaustive]
 #[derive(Debug)]
@@ -214,6 +215,7 @@ pub struct File {
     offset: u64,
     size: u64,
     compressed: bool,
+    uncompressed_size: u64,
 }
 
 fn serialize_bstring(s: &str, zero: bool, vec: &mut Vec<u8>) -> Result<(), WriteError> {
@@ -307,13 +309,19 @@ fn deserialize_null_terminated_string(bytes: &mut impl Read) -> Result<String, R
     Ok(decoded_name)
 }
 
-pub struct FileReader<R: Read> {
-    inner: io::Take<R>,
+pub enum FileReader<'a> {
+    Dyn(Box<dyn Read + 'a>),
+    Vec(Vec<u8>),
 }
 
-impl<R: Read> Read for FileReader<R> {
+impl Read for FileReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.inner.read(buf)
+        match self {
+            Self::Dyn(r) => r.read(buf),
+            Self::Vec(v) => {
+                v.as_slice().read(buf)
+            }
+        }
     }
 }
 
@@ -344,17 +352,20 @@ impl File {
         } else {
             None
         };
-        if compressed {
-            let original_size = read_u32(data, Some(archive_flags))?;
-            println!("size: {}, original_size: {}", size, original_size);
-        }
         let data_size = if compressed { size + 4 } else { size };
+        let uncompressed_size = if compressed {
+            let original_size = read_u32(data, Some(archive_flags))?;
+            original_size as u64
+        } else {
+            data_size
+        };
         data.seek(io::SeekFrom::Current(data_size as i64))?;
         Ok(File {
             name,
             offset: data.stream_position()?,
             size: data_size,
             compressed,
+            uncompressed_size,
         })
     }
 
@@ -366,11 +377,22 @@ impl File {
         }
     }
 
-    pub fn read_contents<'a, R: Read + Seek>(self, bsa: &'a mut Bsa<R>) -> Result<FileReader<&mut R>, io::Error> {
+    pub fn read_contents<'a, R: Read + Seek>(self, bsa: &'a mut Bsa<R>) -> Result<FileReader, io::Error> {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
-        Ok(FileReader {
-            inner: reader.take(self.size)
+        Ok(if self.compressed {
+            let mut compressed_buffer = vec![];
+            compressed_buffer.resize(self.size as usize, 0);
+            reader.read_exact(&mut compressed_buffer[..])?;
+            match lz4_flex::decompress(&compressed_buffer[..], self.uncompressed_size as usize) {
+                Ok(data) => FileReader::Vec(data),
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return Err(io::Error::new(io::ErrorKind::Other, "decompression error"));
+                }
+            }
+        } else {
+            FileReader::Dyn(Box::new(reader.take(self.size)))
         })
     }
 }
@@ -448,13 +470,47 @@ struct FileRecord {
     name: Option<String>,
 }
 
+fn compute_hash(name: &str) -> u64 {
+    let name = name.replace('/', r"\");
+    if let Some(ext_idx) = name.rfind('.') {
+        let (name, ext) = name.split_at(ext_idx);
+        compute_hash_with_ext(name.as_bytes(), ext[1..].as_bytes())
+    } else {
+        compute_hash_with_ext(name.as_bytes(), &[])
+    }
+}
+
+fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
+    let name = name.to_ascii_lowercase();
+    let ext = ext.to_ascii_lowercase();
+    let hash_bytes = [
+        if name.is_empty() { 0x00 } else { name[name.len() - 1] },
+        if name.len() < 3 { 0x00 } else { name[name.len() - 2] },
+        name.len() as u8,
+        name[0]
+    ];
+    let mut hash1 = u32::from_be_bytes(hash_bytes);
+    match ext.as_slice() {
+        b".kf" => hash1 |= 0x80,
+        b".nif" => hash1 |= 0x8000,
+        b".dds" => hash1 |= 0x8080,
+        b".wav" => hash1 |= 0x80000000,
+        _ => (),
+    }
+    let mut hash2 = 0_u32;
+    for &n in &name[1..name.len() - 2] {
+        hash2 = hash2.wrapping_mul(0x1003f).wrapping_add(u32::from(n));
+    }
+    let mut hash3 = 0_u32;
+    for &n in ext.as_slice() {
+        hash3 = hash3.wrapping_mul(0x1003f).wrapping_add(u32::from(n));
+    }
+    (u64::from(hash2.wrapping_add(hash3)) << 32) + u64::from(hash1)
+}
+
 impl<R: Read + Seek> Bsa<R> {
     pub fn folders(&self) -> impl Iterator<Item = Folder> {
         self.header.folders.clone().into_iter()
-    }
-
-    pub fn folders_mut(&mut self) -> impl Iterator<Item = &mut Folder> {
-        self.header.folders.iter_mut()
     }
 
     fn read_header(data: &mut R) -> Result<BsaHeader, ReadError> {
@@ -513,6 +569,11 @@ impl<R: Read + Seek> Bsa<R> {
         for folder_record in &mut folder_records {
             if res.archive_flags.include_directory_names {
                 let name = deserialize_bstring(data, true)?;
+                if compute_hash(&name) != folder_record.name_hash {
+                    eprintln!("Hash mismatch: found {}, computed {} ({})", folder_record.name_hash, compute_hash(&name), &name);
+                } else {
+                    eprintln!("correct hash {}", &name);
+                }
                 folder_record.name = Some(name);
             }
             for _ in 0..folder_record.file_count {
