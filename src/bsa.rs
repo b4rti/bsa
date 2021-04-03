@@ -1,6 +1,6 @@
 #![allow(unused_imports, dead_code)]
 
-use std::{error, fmt, io::{self, Read, Seek, Write}};
+use std::{error, fmt, fs, io::{self, Read, Seek, Write}, path};
 use crate::cp1252;
 use lz4_flex;
 
@@ -13,7 +13,15 @@ pub enum ReadError {
     CompressionUnsupported,
     ExpectedNullByte,
     FailedToReadFileOffset,
-    ReaderError(io::Error)
+    ReaderError(io::Error),
+    IncorrectHash(IncorrectHashError),
+}
+
+#[derive(Debug, Clone)]
+pub struct IncorrectHashError {
+    actual_hash: u64, // hash found in the file
+    expected_hash: u64, // computed hash
+    name: String,
 }
 
 impl fmt::Display for ReadError {
@@ -25,7 +33,13 @@ impl fmt::Display for ReadError {
             Self::CompressionUnsupported => write!(f, "Compression is not currently supported"),
             Self::ExpectedNullByte => write!(f, "Expected a null byte"),
             Self::FailedToReadFileOffset => write!(f, "Failed to read file offset"),
-            Self::ReaderError(err) => write!(f, "{}", err),
+            Self::ReaderError(_) => write!(f, "Error reading file"),
+            Self::IncorrectHash(err) => write!(
+                f,
+                "Incorrect hash for '{}' (expected {}, found {})",
+                &err.name,
+                err.expected_hash,
+                err.actual_hash),
         }
     }
 }
@@ -472,6 +486,10 @@ struct FileRecord {
 
 fn compute_hash(name: &str) -> u64 {
     let name = name.replace('/', r"\");
+    if name.contains('\\') {
+        // no file extension if we're looking as a directory containing dot chars
+        return compute_hash_with_ext(name.as_bytes(), &[]);
+    }
     if let Some(ext_idx) = name.rfind('.') {
         let (name, ext) = name.split_at(ext_idx);
         compute_hash_with_ext(name.as_bytes(), ext.as_bytes())
@@ -506,6 +524,20 @@ fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
         hash3 = hash3.wrapping_mul(0x1003f).wrapping_add(u32::from(n));
     }
     (u64::from(hash2.wrapping_add(hash3)) << 32) + u64::from(hash1)
+}
+
+pub fn read<R: Read + Seek>(mut data: R) -> Result<Bsa<R>, ReadError> {
+    let header = Bsa::read_header(&mut data)?;
+    Ok(Bsa {
+        header,
+        reader: data
+    })
+}
+
+pub fn open<P: AsRef<path::Path>>(path: P) -> Result<Bsa<fs::File>, ReadError> {
+    let file = fs::File::open(path)?;
+    let bsa = read(file)?;
+    Ok(bsa)
 }
 
 impl<R: Read + Seek> Bsa<R> {
@@ -570,9 +602,11 @@ impl<R: Read + Seek> Bsa<R> {
             if res.archive_flags.include_directory_names {
                 let name = deserialize_bstring(data, true)?;
                 if compute_hash(&name) != folder_record.name_hash {
-                    eprintln!("Hash mismatch: found {}, computed {} ({})", folder_record.name_hash, compute_hash(&name), &name);
-                } else {
-                    eprintln!("correct hash {} {}", &name, compute_hash(&name));
+                    return Err(ReadError::IncorrectHash(IncorrectHashError {
+                        actual_hash: folder_record.name_hash,
+                        expected_hash: compute_hash(&name),
+                        name,
+                    }));
                 }
                 folder_record.name = Some(name);
             }
@@ -595,9 +629,11 @@ impl<R: Read + Seek> Bsa<R> {
                 for file_record in &mut folder_record.file_records {
                     let file_name = deserialize_null_terminated_string(data)?;
                     if compute_hash(&file_name) != file_record.name_hash {
-                        eprintln!("Hash mismatch: found {}, computed {} ({})", file_record.name_hash, compute_hash(&file_name), &file_name);
-                    } else {
-                        eprintln!("correct hash {} {}", &file_name, file_record.name_hash);
+                        return Err(ReadError::IncorrectHash(IncorrectHashError {
+                            actual_hash: file_record.name_hash,
+                            expected_hash: compute_hash(&file_name),
+                            name: file_name,
+                        }));
                     }
                     file_record.name = Some(file_name);
                 }
@@ -623,14 +659,6 @@ impl<R: Read + Seek> Bsa<R> {
         }
 
         Ok(res)
-    }
-
-    pub fn read(mut data: R) -> Result<Bsa<R>, ReadError> {
-        let header = Self::read_header(&mut data)?;
-        Ok(Bsa {
-            header,
-            reader: data
-        })
     }
 
     fn write_u32(v: &mut Vec<u8>, value: u32, archive_flags: Option<ArchiveFlags>) {
@@ -664,5 +692,6 @@ mod tests {
         assert_eq!(super::compute_hash("textures/terrain/skuldafnworld"), 0xfd0dbef741e6c64);
         assert_eq!(super::compute_hash("textures/terrain/dlc2solstheimworld/objects"), 0xe38e0b87742b7473);
         assert_eq!(super::compute_hash("skuldafnworld.4.20.-5.dds"), 0xa106a9987315adb5);
+        assert_eq!(super::compute_hash(r"meshes\actors\character\facegendata\facegeom\update.esm"), 9114674761546822509);
     }
 }

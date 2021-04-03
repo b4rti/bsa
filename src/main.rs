@@ -4,8 +4,7 @@ mod bsa;
 mod cp1252;
 
 fn ls(file: &path::Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
-    let file = fs::File::open(file)?;
-    let bsa = bsa::Bsa::read(file)?;
+    let bsa = bsa::open(file)?;
     for folder in bsa.folders() {
         if let Some(folder_name) = folder.name() {
             for file in folder.files() {
@@ -27,8 +26,7 @@ fn cat(
     } else {
         path.to_string()
     };
-    let file = fs::File::open(bsa_file)?;
-    let mut bsa = bsa::Bsa::read(file)?;
+    let mut bsa = bsa::open(bsa_file)?;
     for folder in bsa.folders() {
         if folder.name().is_some() {
             let folder_name = folder.name().unwrap();
@@ -58,8 +56,7 @@ fn extract(
     bsa_file: &path::Path,
     into: Option<&path::Path>,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
-    let file = fs::File::open(bsa_file)?;
-    let mut bsa = bsa::Bsa::read(file)?;
+    let mut bsa = bsa::open(bsa_file)?;
     for folder in bsa.folders() {
         if folder.name().is_some() {
             let folder_name = folder.name().unwrap();
@@ -129,11 +126,20 @@ enum Cli {
     },
 }
 
+fn print_error_chain(mut err: &dyn error::Error) {
+    eprint!("{}", err);
+    while let Some(inner) = err.source() {
+        eprint!(": {}", inner);
+        err = inner;
+    }
+    eprintln!();
+}
+
 fn main() {
     match run() {
         Ok(()) => (),
         Err(err) => {
-            eprintln!("{}", err);
+            print_error_chain(err.as_ref());
             process::exit(1);
         }
     }
