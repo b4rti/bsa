@@ -374,8 +374,7 @@ fn deserialize_bstring(bytes: &mut impl io::Read, zero: bool) -> Result<String, 
     } else {
         length_byte as usize
     };
-    let mut encoded_filename = Vec::with_capacity(name_length);
-    encoded_filename.resize(name_length, 0);
+    let mut encoded_filename = vec![0; name_length];
     bytes.read_exact(&mut encoded_filename)?;
     let mut decoded_name = String::new();
     for byte in encoded_filename {
@@ -472,9 +471,9 @@ impl File {
         }
     }
 
-    pub fn read_contents<'a, R: io::Read + io::Seek>(
+    pub fn read_contents<R: io::Read + io::Seek>(
         self,
-        bsa: &'a mut Bsa<R>,
+        bsa: &mut Bsa<R>,
     ) -> Result<FileReader, io::Error> {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
