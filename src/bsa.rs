@@ -1,6 +1,6 @@
 #![allow(unused_imports, dead_code)]
 
-use std::{error, fmt, fs, io::{self, Read, Seek, Write}, path};
+use std::{error, fmt, fs, io, path};
 use crate::cp1252;
 use lz4_flex;
 
@@ -258,13 +258,13 @@ fn serialize_bstring(s: &str, zero: bool, vec: &mut Vec<u8>) -> Result<(), Write
     Ok(())
 }
 
-fn read_u8(reader: &mut impl Read) -> Result<u8, ReadError> {
+fn read_u8(reader: &mut impl io::Read) -> Result<u8, ReadError> {
     let mut buf = [0];
     reader.read_exact(&mut buf)?;
     Ok(buf[0])
 }
 
-fn read_u32(reader: &mut impl Read, archive_flags: Option<ArchiveFlags>) -> Result<u32, ReadError> {
+fn read_u32(reader: &mut impl io::Read, archive_flags: Option<ArchiveFlags>) -> Result<u32, ReadError> {
     let mut buf = [0; 4];
     reader.read_exact(&mut buf)?;
     if archive_flags.is_some() && archive_flags.unwrap().xbox360_archive {
@@ -274,7 +274,7 @@ fn read_u32(reader: &mut impl Read, archive_flags: Option<ArchiveFlags>) -> Resu
     }
 }
 
-fn read_u64(reader: &mut impl Read, archive_flags: Option<ArchiveFlags>) -> Result<u64, ReadError> {
+fn read_u64(reader: &mut impl io::Read, archive_flags: Option<ArchiveFlags>) -> Result<u64, ReadError> {
     let mut buf = [0; 8];
     reader.read_exact(&mut buf)?;
     if archive_flags.is_some() && archive_flags.unwrap().xbox360_archive {
@@ -284,7 +284,7 @@ fn read_u64(reader: &mut impl Read, archive_flags: Option<ArchiveFlags>) -> Resu
     }
 }
 
-fn deserialize_bstring(bytes: &mut impl Read, zero: bool) -> Result<String, ReadError> {
+fn deserialize_bstring(bytes: &mut impl io::Read, zero: bool) -> Result<String, ReadError> {
     let length_byte = read_u8(bytes)?;
     let name_length = if zero {
         length_byte as usize - 1
@@ -307,7 +307,7 @@ fn deserialize_bstring(bytes: &mut impl Read, zero: bool) -> Result<String, Read
     Ok(decoded_name)
 }
 
-fn deserialize_null_terminated_string(bytes: &mut impl Read) -> Result<String, ReadError> {
+fn deserialize_null_terminated_string(bytes: &mut impl io::Read) -> Result<String, ReadError> {
     let mut encoded_filename = vec![];
     loop {
         let byte = read_u8(bytes)?;
@@ -324,11 +324,11 @@ fn deserialize_null_terminated_string(bytes: &mut impl Read) -> Result<String, R
 }
 
 pub enum FileReader<'a> {
-    Dyn(Box<dyn Read + 'a>),
+    Dyn(Box<dyn io::Read + 'a>),
     Vec(Vec<u8>),
 }
 
-impl Read for FileReader<'_> {
+impl io::Read for FileReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
             Self::Dyn(r) => r.read(buf),
@@ -359,7 +359,7 @@ impl File {
         archive_flags: ArchiveFlags,
         compressed: bool,
         size: u64,
-        data: &mut (impl Read + Seek),
+        data: &mut (impl io::Read + io::Seek),
     ) -> Result<File, ReadError> {
         let name = if archive_flags.embed_file_names {
             Some(deserialize_bstring(data, false)?)
@@ -391,7 +391,7 @@ impl File {
         }
     }
 
-    pub fn read_contents<'a, R: Read + Seek>(self, bsa: &'a mut Bsa<R>) -> Result<FileReader, io::Error> {
+    pub fn read_contents<'a, R: io::Read + io::Seek>(self, bsa: &'a mut Bsa<R>) -> Result<FileReader, io::Error> {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Ok(if self.compressed {
@@ -406,7 +406,7 @@ impl File {
                 }
             }
         } else {
-            FileReader::Dyn(Box::new(reader.take(self.size)))
+            FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
         })
     }
 }
@@ -453,12 +453,12 @@ struct BsaHeader {
     folders: Vec<Folder>,
 }
 
-pub struct Bsa<R: Read> {
+pub struct Bsa<R: io::Read> {
     header: BsaHeader,
     reader: R,
 }
 
-impl<R: Read> fmt::Debug for Bsa<R> {
+impl<R: io::Read> fmt::Debug for Bsa<R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:#?}", self.header)
     }
@@ -530,7 +530,7 @@ fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
     (u64::from(hash2.wrapping_add(hash3)) << 32) + u64::from(hash1)
 }
 
-pub fn read<R: Read + Seek>(mut data: R) -> Result<Bsa<R>, ReadError> {
+pub fn read<R: io::Read + io::Seek>(mut data: R) -> Result<Bsa<R>, ReadError> {
     let header = Bsa::read_header(&mut data)?;
     Ok(Bsa {
         header,
@@ -544,7 +544,7 @@ pub fn open<P: AsRef<path::Path>>(path: P) -> Result<Bsa<fs::File>, ReadError> {
     Ok(bsa)
 }
 
-impl<R: Read + Seek> Bsa<R> {
+impl<R: io::Read + io::Seek> Bsa<R> {
     pub fn folders(&self) -> impl Iterator<Item = Folder> {
         self.header.folders.clone().into_iter()
     }
