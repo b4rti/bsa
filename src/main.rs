@@ -112,7 +112,7 @@ enum Cli {
         /// Input file
         #[structopt(parse(from_os_str))]
         file: path::PathBuf,
-        /// Path to file in the bsa
+        /// Path to file in the BSA
         path: String,
     },
     /// Extract all files from a BSA
@@ -121,7 +121,7 @@ enum Cli {
         #[structopt(parse(from_os_str))]
         file: path::PathBuf,
         /// Directory to extract into
-        #[structopt(parse(from_os_str), long = "into")]
+        #[structopt(parse(from_os_str), long)]
         into: Option<path::PathBuf>,
     },
 }
