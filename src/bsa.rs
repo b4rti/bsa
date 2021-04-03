@@ -1,4 +1,4 @@
-#![allow(unused_imports, dead_code)]
+#![allow(dead_code)]
 
 use std::{error, fmt, fs, io, path};
 use crate::cp1252;
