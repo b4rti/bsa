@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use std::{error, fmt, fs, io, path};
 use crate::cp1252;
 use lz4_flex;
+use std::{error, fmt, fs, io, path};
 
 #[non_exhaustive]
 #[derive(Debug)]
@@ -19,7 +19,7 @@ pub enum ReadError {
 
 #[derive(Debug, Clone)]
 pub struct IncorrectHashError {
-    actual_hash: u64, // hash found in the file
+    actual_hash: u64,   // hash found in the file
     expected_hash: u64, // computed hash
     name: String,
 }
@@ -37,9 +37,8 @@ impl fmt::Display for ReadError {
             Self::IncorrectHash(err) => write!(
                 f,
                 "Incorrect hash for '{}' (expected {}, found {})",
-                &err.name,
-                err.expected_hash,
-                err.actual_hash),
+                &err.name, err.expected_hash, err.actual_hash
+            ),
         }
     }
 }
@@ -72,7 +71,9 @@ impl fmt::Display for WriteError {
         match self {
             Self::UnencodableCharacters(_) => write!(f, "Unencodable characters found"),
             Self::CompressionUnsupported => write!(f, "Compression is not currently supported"),
-            Self::FileNameMoreThan255Characters => write!(f, "File name is longer than 255 characters"),
+            Self::FileNameMoreThan255Characters => {
+                write!(f, "File name is longer than 255 characters")
+            }
             Self::MissingFileName => write!(f, "Missing file name"),
         }
     }
@@ -91,7 +92,7 @@ impl error::Error for WriteError {
 enum Version {
     Oblivion,
     Skyrim,
-    SkyrimSpecialEdition
+    SkyrimSpecialEdition,
 }
 
 impl Version {
@@ -130,16 +131,36 @@ struct ArchiveFlags {
 impl ArchiveFlags {
     fn serialize(self) -> u32 {
         let mut res = 0;
-        if self.include_directory_names { res |= 0x01; }
-        if self.include_file_names { res |= 0x02; }
-        if self.compressed_archive { res |= 0x04; }
-        if self.retain_directory_names { res |= 0x08; }
-        if self.retain_file_names { res |= 0x10; }
-        if self.retain_file_name_offsets { res |= 0x20; }
-        if self.xbox360_archive { res |= 0x40; }
-        if self.retain_strings { res |= 0x80; }
-        if self.embed_file_names { res |= 0x100; }
-        if self.xmem_codec { res |= 0x200; }
+        if self.include_directory_names {
+            res |= 0x01;
+        }
+        if self.include_file_names {
+            res |= 0x02;
+        }
+        if self.compressed_archive {
+            res |= 0x04;
+        }
+        if self.retain_directory_names {
+            res |= 0x08;
+        }
+        if self.retain_file_names {
+            res |= 0x10;
+        }
+        if self.retain_file_name_offsets {
+            res |= 0x20;
+        }
+        if self.xbox360_archive {
+            res |= 0x40;
+        }
+        if self.retain_strings {
+            res |= 0x80;
+        }
+        if self.embed_file_names {
+            res |= 0x100;
+        }
+        if self.xmem_codec {
+            res |= 0x200;
+        }
         res
     }
 
@@ -156,16 +177,36 @@ impl ArchiveFlags {
             embed_file_names: false,
             xmem_codec: false,
         };
-        if (value & 0x01) != 0 { res.include_directory_names = true; }
-        if (value & 0x02) != 0 { res.include_file_names = true; }
-        if (value & 0x04) != 0 { res.compressed_archive = true; }
-        if (value & 0x08) != 0 { res.retain_directory_names = true; }
-        if (value & 0x10) != 0 { res.retain_file_names = true; }
-        if (value & 0x20) != 0 { res.retain_file_name_offsets = true; }
-        if (value & 0x40) != 0 { res.xbox360_archive = true; }
-        if (value & 0x80) != 0 { res.retain_strings = true; }
-        if (value & 0x100) != 0 { res.embed_file_names = true; }
-        if (value & 0x200) != 0 { res.xmem_codec = true; }
+        if (value & 0x01) != 0 {
+            res.include_directory_names = true;
+        }
+        if (value & 0x02) != 0 {
+            res.include_file_names = true;
+        }
+        if (value & 0x04) != 0 {
+            res.compressed_archive = true;
+        }
+        if (value & 0x08) != 0 {
+            res.retain_directory_names = true;
+        }
+        if (value & 0x10) != 0 {
+            res.retain_file_names = true;
+        }
+        if (value & 0x20) != 0 {
+            res.retain_file_name_offsets = true;
+        }
+        if (value & 0x40) != 0 {
+            res.xbox360_archive = true;
+        }
+        if (value & 0x80) != 0 {
+            res.retain_strings = true;
+        }
+        if (value & 0x100) != 0 {
+            res.embed_file_names = true;
+        }
+        if (value & 0x200) != 0 {
+            res.xmem_codec = true;
+        }
         res
     }
 }
@@ -186,15 +227,33 @@ struct FileFlags {
 impl FileFlags {
     fn serialize(self) -> u32 {
         let mut res = 0;
-        if self.meshes { res |= 0x01; }
-        if self.textures { res |= 0x02; }
-        if self.menus { res |= 0x04; }
-        if self.sounds { res |= 0x08; }
-        if self.voices { res |= 0x10; }
-        if self.shaders { res |= 0x20; }
-        if self.trees { res |= 0x40; }
-        if self.fonts { res |= 0x80; }
-        if self.miscellaneous { res |= 0x100; }
+        if self.meshes {
+            res |= 0x01;
+        }
+        if self.textures {
+            res |= 0x02;
+        }
+        if self.menus {
+            res |= 0x04;
+        }
+        if self.sounds {
+            res |= 0x08;
+        }
+        if self.voices {
+            res |= 0x10;
+        }
+        if self.shaders {
+            res |= 0x20;
+        }
+        if self.trees {
+            res |= 0x40;
+        }
+        if self.fonts {
+            res |= 0x80;
+        }
+        if self.miscellaneous {
+            res |= 0x100;
+        }
         res
     }
 
@@ -210,15 +269,33 @@ impl FileFlags {
             fonts: false,
             miscellaneous: false,
         };
-        if (value & 0x01) != 0 { res.meshes = true; }
-        if (value & 0x02) != 0 { res.textures = true; }
-        if (value & 0x04) != 0 { res.menus = true; }
-        if (value & 0x08) != 0 { res.sounds = true; }
-        if (value & 0x10) != 0 { res.voices = true; }
-        if (value & 0x20) != 0 { res.shaders = true; }
-        if (value & 0x40) != 0 { res.trees = true; }
-        if (value & 0x80) != 0 { res.fonts = true; }
-        if (value & 0x100) != 0 { res.miscellaneous = true; }
+        if (value & 0x01) != 0 {
+            res.meshes = true;
+        }
+        if (value & 0x02) != 0 {
+            res.textures = true;
+        }
+        if (value & 0x04) != 0 {
+            res.menus = true;
+        }
+        if (value & 0x08) != 0 {
+            res.sounds = true;
+        }
+        if (value & 0x10) != 0 {
+            res.voices = true;
+        }
+        if (value & 0x20) != 0 {
+            res.shaders = true;
+        }
+        if (value & 0x40) != 0 {
+            res.trees = true;
+        }
+        if (value & 0x80) != 0 {
+            res.fonts = true;
+        }
+        if (value & 0x100) != 0 {
+            res.miscellaneous = true;
+        }
         res
     }
 }
@@ -264,7 +341,10 @@ fn read_u8(reader: &mut impl io::Read) -> Result<u8, ReadError> {
     Ok(buf[0])
 }
 
-fn read_u32(reader: &mut impl io::Read, archive_flags: Option<ArchiveFlags>) -> Result<u32, ReadError> {
+fn read_u32(
+    reader: &mut impl io::Read,
+    archive_flags: Option<ArchiveFlags>,
+) -> Result<u32, ReadError> {
     let mut buf = [0; 4];
     reader.read_exact(&mut buf)?;
     if archive_flags.is_some() && archive_flags.unwrap().xbox360_archive {
@@ -274,7 +354,10 @@ fn read_u32(reader: &mut impl io::Read, archive_flags: Option<ArchiveFlags>) -> 
     }
 }
 
-fn read_u64(reader: &mut impl io::Read, archive_flags: Option<ArchiveFlags>) -> Result<u64, ReadError> {
+fn read_u64(
+    reader: &mut impl io::Read,
+    archive_flags: Option<ArchiveFlags>,
+) -> Result<u64, ReadError> {
     let mut buf = [0; 8];
     reader.read_exact(&mut buf)?;
     if archive_flags.is_some() && archive_flags.unwrap().xbox360_archive {
@@ -301,7 +384,7 @@ fn deserialize_bstring(bytes: &mut impl io::Read, zero: bool) -> Result<String, 
     if zero {
         let null_byte = read_u8(bytes)?;
         if null_byte != 0 {
-            return Err(ReadError::ExpectedNullByte)
+            return Err(ReadError::ExpectedNullByte);
         }
     }
     Ok(decoded_name)
@@ -332,9 +415,7 @@ impl io::Read for FileReader<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
             Self::Dyn(r) => r.read(buf),
-            Self::Vec(v) => {
-                v.as_slice().read(buf)
-            }
+            Self::Vec(v) => v.as_slice().read(buf),
         }
     }
 }
@@ -391,7 +472,10 @@ impl File {
         }
     }
 
-    pub fn read_contents<'a, R: io::Read + io::Seek>(self, bsa: &'a mut Bsa<R>) -> Result<FileReader, io::Error> {
+    pub fn read_contents<'a, R: io::Read + io::Seek>(
+        self,
+        bsa: &'a mut Bsa<R>,
+    ) -> Result<FileReader, io::Error> {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Ok(if self.compressed {
@@ -437,7 +521,11 @@ impl Folder {
 
 impl fmt::Debug for File {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "File {:?} (offset {}, size {}, compressed {})", self.name, self.offset, self.size, self.compressed)
+        write!(
+            f,
+            "File {:?} (offset {}, size {}, compressed {})",
+            self.name, self.offset, self.size, self.compressed
+        )
     }
 }
 
@@ -502,8 +590,16 @@ fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
     let name = name.to_ascii_lowercase();
     let ext = ext.to_ascii_lowercase();
     let hash_bytes = [
-        if name.is_empty() { 0x00 } else { name[name.len() - 1] },
-        if name.len() < 3 { 0x00 } else { name[name.len() - 2] },
+        if name.is_empty() {
+            0x00
+        } else {
+            name[name.len() - 1]
+        },
+        if name.len() < 3 {
+            0x00
+        } else {
+            name[name.len() - 2]
+        },
         name.len() as u8,
         // not sure about this extra check
         if name.is_empty() { 0x00 } else { name[0] },
@@ -534,7 +630,7 @@ pub fn read<R: io::Read + io::Seek>(mut data: R) -> Result<Bsa<R>, ReadError> {
     let header = Bsa::read_header(&mut data)?;
     Ok(Bsa {
         header,
-        reader: data
+        reader: data,
     })
 }
 
@@ -553,7 +649,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
         let mut magic = [0; 4];
         data.read_exact(&mut magic)?;
         if &magic != b"BSA\0" {
-            return Err(ReadError::MissingHeader)
+            return Err(ReadError::MissingHeader);
         }
         let version_num = read_u32(data, None)?;
         let version = Version::deserialize(version_num)?;
@@ -653,10 +749,15 @@ impl<R: io::Read + io::Seek> Bsa<R> {
                 files: vec![],
             };
             for file_record in folder_record.file_records {
-                let override_compressed = if file_record.size & 0x40000000 != 0 { true } else { false };
+                let override_compressed: bool = file_record.size & 0x40000000 != 0;
                 let compressed = archive_flags.compressed_archive != override_compressed;
 
-                let mut file = File::deserialize(res.archive_flags, compressed, file_record.size.into(), data)?;
+                let mut file = File::deserialize(
+                    res.archive_flags,
+                    compressed,
+                    file_record.size.into(),
+                    data,
+                )?;
                 if file.name.is_none() && file_record.name.is_some() {
                     file.name = file_record.name;
                 }
@@ -696,10 +797,22 @@ impl<R: io::Read + io::Seek> Bsa<R> {
 mod tests {
     #[test]
     fn test_hash_calculation() {
-        assert_eq!(super::compute_hash("textures/terrain/skuldafnworld"), 0xfd0dbef741e6c64);
-        assert_eq!(super::compute_hash("textures/terrain/dlc2solstheimworld/objects"), 0xe38e0b87742b7473);
-        assert_eq!(super::compute_hash("skuldafnworld.4.20.-5.dds"), 0xa106a9987315adb5);
-        assert_eq!(super::compute_hash(r"meshes\actors\character\facegendata\facegeom\update.esm"), 0x7e7dd4676d37736d);
+        assert_eq!(
+            super::compute_hash("textures/terrain/skuldafnworld"),
+            0xfd0dbef741e6c64
+        );
+        assert_eq!(
+            super::compute_hash("textures/terrain/dlc2solstheimworld/objects"),
+            0xe38e0b87742b7473
+        );
+        assert_eq!(
+            super::compute_hash("skuldafnworld.4.20.-5.dds"),
+            0xa106a9987315adb5
+        );
+        assert_eq!(
+            super::compute_hash(r"meshes\actors\character\facegendata\facegeom\update.esm"),
+            0x7e7dd4676d37736d
+        );
         assert_eq!(super::compute_hash("seq"), 0x73036571);
     }
 }

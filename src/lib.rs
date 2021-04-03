@@ -6,6 +6,5 @@ pub use crate::bsa::{Bsa, ReadError};
 #[cfg(test)]
 mod tests {
     #[test]
-    fn make_new_bsa() {
-    }
+    fn make_new_bsa() {}
 }
