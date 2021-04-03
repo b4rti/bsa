@@ -1,11 +1,9 @@
-use std::path::{Path, PathBuf};
-use std::{error, fs, io, path};
-use structopt::StructOpt;
+use std::{error, fs, io, path, process};
 
 mod bsa;
 mod cp1252;
 
-fn ls(file: &Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn ls(file: &path::Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let file = fs::File::open(file)?;
     let bsa = bsa::Bsa::read(file)?;
     for folder in bsa.folders() {
@@ -20,7 +18,10 @@ fn ls(file: &Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> 
     Ok(())
 }
 
-fn cat(bsa_file: &Path, path: &str) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn cat(
+    bsa_file: &path::Path,
+    path: &str,
+) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let path = if path.find('/').is_some() {
         path.replace('/', "\\")
     } else {
@@ -54,8 +55,8 @@ fn cat(bsa_file: &Path, path: &str) -> Result<(), Box<dyn error::Error + Send + 
 }
 
 fn extract(
-    bsa_file: &Path,
-    into: Option<&Path>,
+    bsa_file: &path::Path,
+    into: Option<&path::Path>,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let file = fs::File::open(bsa_file)?;
     let mut bsa = bsa::Bsa::read(file)?;
@@ -86,7 +87,7 @@ fn extract(
 }
 
 fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
-    let args = Cli::from_args();
+    let args = <Cli as structopt::StructOpt>::from_args();
     match args {
         Cli::Ls { file } => ls(&file)?,
         Cli::Cat { file, path } => cat(&file, &path)?,
@@ -101,26 +102,30 @@ fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     Ok(())
 }
 
-#[derive(StructOpt, Debug)]
+#[derive(structopt::StructOpt, Debug)]
 enum Cli {
+    /// List files in a BSA
     Ls {
         /// Input file
         #[structopt(parse(from_os_str))]
-        file: PathBuf,
+        file: path::PathBuf,
     },
+    /// Output a file from a BSA
     Cat {
         /// Input file
         #[structopt(parse(from_os_str))]
-        file: PathBuf,
+        file: path::PathBuf,
         /// Path to file in the bsa
         path: String,
     },
+    /// Extract all files from a BSA
     Extract {
         /// Input file
         #[structopt(parse(from_os_str))]
-        file: PathBuf,
+        file: path::PathBuf,
+        /// Directory to extract into
         #[structopt(parse(from_os_str), long = "into")]
-        into: Option<PathBuf>,
+        into: Option<path::PathBuf>,
     },
 }
 
@@ -129,6 +134,7 @@ fn main() {
         Ok(()) => (),
         Err(err) => {
             eprintln!("{}", err);
+            process::exit(1);
         }
     }
 }
