@@ -612,6 +612,9 @@ impl<R: Read + Seek> Bsa<R> {
                         name,
                     }));
                 }
+                // } else {
+                //     println!("'{}' {}", &name, folder_record.name_hash);
+                // }
                 folder_record.name = Some(name);
             }
             for _ in 0..folder_record.file_count {
@@ -696,6 +699,7 @@ mod tests {
         assert_eq!(super::compute_hash("textures/terrain/skuldafnworld"), 0xfd0dbef741e6c64);
         assert_eq!(super::compute_hash("textures/terrain/dlc2solstheimworld/objects"), 0xe38e0b87742b7473);
         assert_eq!(super::compute_hash("skuldafnworld.4.20.-5.dds"), 0xa106a9987315adb5);
-        assert_eq!(super::compute_hash(r"meshes\actors\character\facegendata\facegeom\update.esm"), 9114674761546822509);
+        assert_eq!(super::compute_hash(r"meshes\actors\character\facegendata\facegeom\update.esm"), 0x7e7dd4676d37736d);
+        assert_eq!(super::compute_hash("seq"), 0x73036571);
     }
 }
