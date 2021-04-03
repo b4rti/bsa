@@ -1,7 +1,7 @@
 mod bsa;
 mod cp1252;
 
-pub use bsa::{Bsa, ReadError};
+pub use crate::bsa::{Bsa, ReadError};
 
 #[cfg(test)]
 mod tests {

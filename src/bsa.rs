@@ -474,7 +474,7 @@ fn compute_hash(name: &str) -> u64 {
     let name = name.replace('/', r"\");
     if let Some(ext_idx) = name.rfind('.') {
         let (name, ext) = name.split_at(ext_idx);
-        compute_hash_with_ext(name.as_bytes(), ext[1..].as_bytes())
+        compute_hash_with_ext(name.as_bytes(), ext.as_bytes())
     } else {
         compute_hash_with_ext(name.as_bytes(), &[])
     }
@@ -489,7 +489,7 @@ fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
         name.len() as u8,
         name[0]
     ];
-    let mut hash1 = u32::from_be_bytes(hash_bytes);
+    let mut hash1 = u32::from_le_bytes(hash_bytes);
     match ext.as_slice() {
         b".kf" => hash1 |= 0x80,
         b".nif" => hash1 |= 0x8000,
@@ -572,7 +572,7 @@ impl<R: Read + Seek> Bsa<R> {
                 if compute_hash(&name) != folder_record.name_hash {
                     eprintln!("Hash mismatch: found {}, computed {} ({})", folder_record.name_hash, compute_hash(&name), &name);
                 } else {
-                    eprintln!("correct hash {}", &name);
+                    eprintln!("correct hash {} {}", &name, compute_hash(&name));
                 }
                 folder_record.name = Some(name);
             }
@@ -594,6 +594,11 @@ impl<R: Read + Seek> Bsa<R> {
             for folder_record in &mut folder_records {
                 for file_record in &mut folder_record.file_records {
                     let file_name = deserialize_null_terminated_string(data)?;
+                    if compute_hash(&file_name) != file_record.name_hash {
+                        eprintln!("Hash mismatch: found {}, computed {} ({})", file_record.name_hash, compute_hash(&file_name), &file_name);
+                    } else {
+                        eprintln!("correct hash {} {}", &file_name, file_record.name_hash);
+                    }
                     file_record.name = Some(file_name);
                 }
             }
@@ -650,4 +655,14 @@ impl<R: Read + Seek> Bsa<R> {
     //     Self::write_u32(&mut res, self.file_flags.serialize(), Some(self.archive_flags));
     //     res
     // }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_hash_calculation() {
+        assert_eq!(super::compute_hash("textures/terrain/skuldafnworld"), 0xfd0dbef741e6c64);
+        assert_eq!(super::compute_hash("textures/terrain/dlc2solstheimworld/objects"), 0xe38e0b87742b7473);
+        assert_eq!(super::compute_hash("skuldafnworld.4.20.-5.dds"), 0xa106a9987315adb5);
+    }
 }
