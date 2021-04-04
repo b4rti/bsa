@@ -438,25 +438,32 @@ impl File {
     fn deserialize(
         archive_flags: ArchiveFlags,
         compressed: bool,
+        offset: u64,
         size: u64,
         data: &mut (impl io::Read + io::Seek),
     ) -> Result<File, ReadError> {
+        let actual_pos = data.stream_position()?;
+        if actual_pos != offset {
+            //eprintln!("Warning: expected file to be at offset {}, actually at {}", actual_pos, offset);
+            data.seek(io::SeekFrom::Start(offset))?;
+        }
         let name = if archive_flags.embed_file_names {
             Some(deserialize_bstring(data, false)?)
         } else {
             None
         };
-        let data_size = if compressed { size + 4 } else { size };
+        let data_size = if compressed { size - 4 } else { size };
         let uncompressed_size = if compressed {
             let original_size = read_u32(data, Some(archive_flags))?;
             original_size as u64
         } else {
             data_size
         };
+        let data_offset = data.stream_position()?;
         data.seek(io::SeekFrom::Current(data_size as i64))?;
         Ok(File {
             name,
-            offset: data.stream_position()?,
+            offset: data_offset,
             size: data_size,
             compressed,
             uncompressed_size,
@@ -478,14 +485,19 @@ impl File {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Ok(if self.compressed {
-            let mut compressed_buffer = vec![];
-            compressed_buffer.resize(self.size as usize, 0);
+            let mut compressed_buffer = vec![0; self.size as usize];
+            eprintln!(
+                "Reading from offset {}, size: {}",
+                reader.stream_position()?,
+                self.size
+            );
             reader.read_exact(&mut compressed_buffer[..])?;
             match lz4_flex::decompress(&compressed_buffer[..], self.uncompressed_size as usize) {
                 Ok(data) => FileReader::Vec(data),
                 Err(e) => {
-                    eprintln!("{}", e);
-                    return Err(io::Error::new(io::ErrorKind::Other, "decompression error"));
+                    eprintln!("Decompression error: {}", e);
+                    FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
+                    //return Err(io::Error::new(io::ErrorKind::Other, "decompression error"));
                 }
             }
         } else {
@@ -656,8 +668,8 @@ impl<R: io::Read + io::Seek> Bsa<R> {
         if offset != 36 {
             return Err(ReadError::UnexpectedFolderRecordOffset);
         }
-        let archive_flags_u64 = read_u32(data, None)?;
-        let archive_flags = ArchiveFlags::deserialize(archive_flags_u64);
+        let archive_flags_u32 = read_u32(data, None)?;
+        let archive_flags = ArchiveFlags::deserialize(archive_flags_u32);
         let folder_count = read_u32(data, Some(archive_flags))?;
         let file_count = read_u32(data, Some(archive_flags))?;
         let total_folder_name_length = read_u32(data, Some(archive_flags))?;
@@ -749,11 +761,15 @@ impl<R: io::Read + io::Seek> Bsa<R> {
             };
             for file_record in folder_record.file_records {
                 let override_compressed: bool = file_record.size & 0x40000000 != 0;
+                if override_compressed {
+                    eprintln!("override_compressed is set");
+                }
                 let compressed = archive_flags.compressed_archive != override_compressed;
 
                 let mut file = File::deserialize(
                     res.archive_flags,
                     compressed,
+                    file_record.offset.into(),
                     file_record.size.into(),
                     data,
                 )?;
