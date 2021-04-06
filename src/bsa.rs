@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use crate::cp1252;
+use log::{error, info, trace, warn};
 use lz4_flex;
-use log::{info, trace, warn, error};
 use std::{error, fmt, fs, io, path};
 
 #[non_exhaustive]
@@ -445,7 +445,10 @@ impl File {
     ) -> Result<File, ReadError> {
         let actual_pos = data.stream_position()?;
         if actual_pos != offset {
-            //eprintln!("Warning: expected file to be at offset {}, actually at {}", actual_pos, offset);
+            warn!(
+                "expected file to be at offset {}, actually at {}",
+                actual_pos, offset
+            );
             data.seek(io::SeekFrom::Start(offset))?;
         }
         let name = if archive_flags.embed_file_names {
@@ -487,7 +490,7 @@ impl File {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Ok(if self.compressed {
             let mut compressed_buffer = vec![0; self.size as usize];
-            eprintln!(
+            info!(
                 "Reading from offset {}, size: {}",
                 reader.stream_position()?,
                 self.size
@@ -496,7 +499,7 @@ impl File {
             match lz4_flex::decompress(&compressed_buffer[..], self.uncompressed_size as usize) {
                 Ok(data) => FileReader::Vec(data),
                 Err(e) => {
-                    eprintln!("Decompression error: {}", e);
+                    error!("Decompression error: {}", e);
                     FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
                     //return Err(io::Error::new(io::ErrorKind::Other, "decompression error"));
                 }
@@ -715,16 +718,24 @@ impl<R: io::Read + io::Seek> Bsa<R> {
         for folder_record in &mut folder_records {
             if res.archive_flags.include_directory_names {
                 let name = deserialize_bstring(data, true)?;
-                if compute_hash(&name) != folder_record.name_hash {
+                let computed_hash = compute_hash(&name);
+                if computed_hash != folder_record.name_hash {
+                    error!(
+                        "Incorrect hash: calculated {:016x} instead of {:016x} for '{}'",
+                        computed_hash, folder_record.name_hash, &name
+                    );
                     return Err(ReadError::IncorrectHash(IncorrectHashError {
                         actual_hash: folder_record.name_hash,
                         expected_hash: compute_hash(&name),
                         name,
                     }));
+                } else {
+                    trace!(
+                        "Matching hash: {:016x} for '{}'",
+                        folder_record.name_hash,
+                        &name
+                    );
                 }
-                // } else {
-                //     println!("'{}' {}", &name, folder_record.name_hash);
-                // }
                 folder_record.name = Some(name);
             }
             for _ in 0..folder_record.file_count {
@@ -745,12 +756,19 @@ impl<R: io::Read + io::Seek> Bsa<R> {
             for folder_record in &mut folder_records {
                 for file_record in &mut folder_record.file_records {
                     let file_name = deserialize_null_terminated_string(data)?;
-                    if compute_hash(&file_name) != file_record.name_hash {
+                    let computed_hash = compute_hash(&file_name);
+                    if computed_hash != file_record.name_hash {
+                        error!(
+                            "Incorrect hash: calculated {:016x} instead of {:016x} for '{}'",
+                            computed_hash, file_record.name_hash, &file_name
+                        );
                         return Err(ReadError::IncorrectHash(IncorrectHashError {
                             actual_hash: file_record.name_hash,
                             expected_hash: compute_hash(&file_name),
                             name: file_name,
                         }));
+                    } else {
+                        trace!("Matching hash: {:016x} for '{}'", computed_hash, &file_name);
                     }
                     file_record.name = Some(file_name);
                 }
@@ -765,7 +783,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
             for file_record in folder_record.file_records {
                 let override_compressed: bool = file_record.size & 0x40000000 != 0;
                 if override_compressed {
-                    eprintln!("override_compressed is set");
+                    warn!("override_compressed is set");
                 }
                 let compressed = archive_flags.compressed_archive != override_compressed;
 

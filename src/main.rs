@@ -9,12 +9,12 @@ fn setup_logger(verbose: bool) {
     } else {
         log::LevelFilter::Off
     };
-    pretty_env_logger::formatted_builder().filter(None, level).init();
+    pretty_env_logger::formatted_builder()
+        .filter(None, level)
+        .init();
 }
 
-fn ls(
-    file: &path::Path,
-) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn ls(file: &path::Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let bsa = bsa::open(file)?;
     for folder in bsa.folders() {
         if let Some(folder_name) = folder.name() {
