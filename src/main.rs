@@ -3,11 +3,19 @@ use std::{error, fs, io, path, process};
 mod bsa;
 mod cp1252;
 
+fn setup_logger(verbose: bool) {
+    let level = if verbose {
+        log::LevelFilter::max()
+    } else {
+        log::LevelFilter::Off
+    };
+    pretty_env_logger::formatted_builder().filter(None, level).init();
+}
+
 fn ls(
     file: &path::Path,
-    verbose: bool,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
-    let bsa = bsa::open(file, verbose)?;
+    let bsa = bsa::open(file)?;
     for folder in bsa.folders() {
         if let Some(folder_name) = folder.name() {
             for file in folder.files() {
@@ -23,14 +31,13 @@ fn ls(
 fn cat(
     bsa_file: &path::Path,
     path: &str,
-    verbose: bool,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let path = if path.find('/').is_some() {
         path.replace('/', "\\")
     } else {
         path.to_string()
     };
-    let mut bsa = bsa::open(bsa_file, verbose)?;
+    let mut bsa = bsa::open(bsa_file)?;
     for folder in bsa.folders() {
         if folder.name().is_some() {
             let folder_name = folder.name().unwrap();
@@ -59,9 +66,8 @@ fn cat(
 fn extract(
     bsa_file: &path::Path,
     into: Option<&path::Path>,
-    verbose: bool,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
-    let mut bsa = bsa::open(bsa_file, verbose)?;
+    let mut bsa = bsa::open(bsa_file)?;
     for folder in bsa.folders() {
         if folder.name().is_some() {
             let folder_name = folder.name().unwrap();
@@ -91,21 +97,28 @@ fn extract(
 fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let args = <Cli as structopt::StructOpt>::from_args();
     match args {
-        Cli::Ls { file, verbose } => ls(&file, verbose)?,
+        Cli::Ls { file, verbose } => {
+            setup_logger(verbose);
+            ls(&file)?
+        }
         Cli::Cat {
             file,
             path,
             verbose,
-        } => cat(&file, &path, verbose)?,
+        } => {
+            setup_logger(verbose);
+            cat(&file, &path)?
+        }
         Cli::Extract {
             file,
             into,
             verbose,
         } => {
+            setup_logger(verbose);
             if let Some(into) = into {
-                extract(&file, Some(&into), verbose)?
+                extract(&file, Some(&into))?
             } else {
-                extract(&file, None, verbose)?
+                extract(&file, None)?
             }
         }
     }
