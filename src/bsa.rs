@@ -443,7 +443,12 @@ impl File {
         size: u64,
         data: &mut (impl io::Read + io::Seek),
     ) -> Result<File, ReadError> {
-        trace!("Deserialising file at offset {}, size {}, compressed {}", offset, size, compressed);
+        trace!(
+            "Deserialising file at offset {}, size {}, compressed {}",
+            offset,
+            size,
+            compressed
+        );
         let actual_pos = data.stream_position()?;
         if actual_pos != offset {
             warn!(
@@ -452,17 +457,21 @@ impl File {
             );
             data.seek(io::SeekFrom::Start(offset))?;
         }
-        let name = if archive_flags.embed_file_names {
-            let name = deserialize_bstring(data, false)?;
-            info!("Found embedded filename '{}'", name);
-            Some(name)
+        let name = None;
+        let name_offset = if archive_flags.embed_file_names {
+            let length_byte = read_u8(data)?;
+            data.seek(io::SeekFrom::Current(length_byte as i64))?;
+            length_byte + 1
         } else {
-            None
-        };
-        let data_size = if compressed { size - 4 } else { size };
+            0 as u8
+        } as u64;
+        let data_size = (if compressed { size - 4 } else { size }) - name_offset;
         let uncompressed_size = if compressed {
             let original_size = read_u32(data, Some(archive_flags))?;
-            info!("compressed size {}, uncompressed size {}", data_size, original_size);
+            info!(
+                "compressed size {}, uncompressed size {}",
+                data_size, original_size
+            );
             original_size as u64
         } else {
             data_size
@@ -685,8 +694,8 @@ impl<R: io::Read + io::Seek> Bsa<R> {
         let file_count = read_u32(data, Some(archive_flags))?;
         let total_folder_name_length = read_u32(data, Some(archive_flags))?;
         let total_file_name_length = read_u32(data, Some(archive_flags))?;
-        let file_flags_u64 = read_u32(data, None)?;
-        let file_flags = FileFlags::deserialize(file_flags_u64);
+        let file_flags_u32 = read_u32(data, None)?;
+        let file_flags = FileFlags::deserialize(file_flags_u32);
 
         let mut res = BsaHeader {
             version,
