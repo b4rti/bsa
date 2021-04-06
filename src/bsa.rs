@@ -443,6 +443,7 @@ impl File {
         size: u64,
         data: &mut (impl io::Read + io::Seek),
     ) -> Result<File, ReadError> {
+        trace!("Deserialising file at offset {}, size {}, compressed {}", offset, size, compressed);
         let actual_pos = data.stream_position()?;
         if actual_pos != offset {
             warn!(
@@ -452,18 +453,22 @@ impl File {
             data.seek(io::SeekFrom::Start(offset))?;
         }
         let name = if archive_flags.embed_file_names {
-            Some(deserialize_bstring(data, false)?)
+            let name = deserialize_bstring(data, false)?;
+            info!("Found embedded filename '{}'", name);
+            Some(name)
         } else {
             None
         };
         let data_size = if compressed { size - 4 } else { size };
         let uncompressed_size = if compressed {
             let original_size = read_u32(data, Some(archive_flags))?;
+            info!("compressed size {}, uncompressed size {}", data_size, original_size);
             original_size as u64
         } else {
             data_size
         };
         let data_offset = data.stream_position()?;
+        info!("data_offset {}, original offset {}", data_offset, offset);
         data.seek(io::SeekFrom::Current(data_size as i64))?;
         Ok(File {
             name,
