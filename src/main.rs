@@ -3,8 +3,11 @@ use std::{error, fs, io, path, process};
 mod bsa;
 mod cp1252;
 
-fn ls(file: &path::Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
-    let bsa = bsa::open(file)?;
+fn ls(
+    file: &path::Path,
+    verbose: bool,
+) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+    let bsa = bsa::open(file, verbose)?;
     for folder in bsa.folders() {
         if let Some(folder_name) = folder.name() {
             for file in folder.files() {
@@ -20,13 +23,14 @@ fn ls(file: &path::Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'sta
 fn cat(
     bsa_file: &path::Path,
     path: &str,
+    verbose: bool,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let path = if path.find('/').is_some() {
         path.replace('/', "\\")
     } else {
         path.to_string()
     };
-    let mut bsa = bsa::open(bsa_file)?;
+    let mut bsa = bsa::open(bsa_file, verbose)?;
     for folder in bsa.folders() {
         if folder.name().is_some() {
             let folder_name = folder.name().unwrap();
@@ -55,8 +59,9 @@ fn cat(
 fn extract(
     bsa_file: &path::Path,
     into: Option<&path::Path>,
+    verbose: bool,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
-    let mut bsa = bsa::open(bsa_file)?;
+    let mut bsa = bsa::open(bsa_file, verbose)?;
     for folder in bsa.folders() {
         if folder.name().is_some() {
             let folder_name = folder.name().unwrap();
@@ -86,13 +91,21 @@ fn extract(
 fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let args = <Cli as structopt::StructOpt>::from_args();
     match args {
-        Cli::Ls { file } => ls(&file)?,
-        Cli::Cat { file, path } => cat(&file, &path)?,
-        Cli::Extract { file, into } => {
+        Cli::Ls { file, verbose } => ls(&file, verbose)?,
+        Cli::Cat {
+            file,
+            path,
+            verbose,
+        } => cat(&file, &path, verbose)?,
+        Cli::Extract {
+            file,
+            into,
+            verbose,
+        } => {
             if let Some(into) = into {
-                extract(&file, Some(&into))?
+                extract(&file, Some(&into), verbose)?
             } else {
-                extract(&file, None)?
+                extract(&file, None, verbose)?
             }
         }
     }
@@ -106,6 +119,9 @@ enum Cli {
         /// Input file
         #[structopt(parse(from_os_str))]
         file: path::PathBuf,
+        /// Enable verbose output
+        #[structopt(short, long)]
+        verbose: bool,
     },
     /// Output a file from a BSA
     Cat {
@@ -114,6 +130,9 @@ enum Cli {
         file: path::PathBuf,
         /// Path to file in the BSA
         path: String,
+        /// Enable verbose output
+        #[structopt(short, long)]
+        verbose: bool,
     },
     /// Extract all files from a BSA
     Extract {
@@ -123,6 +142,9 @@ enum Cli {
         /// Directory to extract into
         #[structopt(parse(from_os_str), long)]
         into: Option<path::PathBuf>,
+        /// Enable verbose output
+        #[structopt(short, long)]
+        verbose: bool,
     },
 }
 

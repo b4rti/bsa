@@ -637,18 +637,26 @@ fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
     (u64::from(hash2.wrapping_add(hash3)) << 32) + u64::from(hash1)
 }
 
-pub fn read<R: io::Read + io::Seek>(mut data: R) -> Result<Bsa<R>, ReadError> {
-    let header = Bsa::read_header(&mut data)?;
+pub fn read<R: io::Read + io::Seek>(mut data: R, verbose: bool) -> Result<Bsa<R>, ReadError> {
+    let header = Bsa::read_header(&mut data, verbose)?;
     Ok(Bsa {
         header,
         reader: data,
     })
 }
 
-pub fn open<P: AsRef<path::Path>>(path: P) -> Result<Bsa<fs::File>, ReadError> {
+pub fn open<P: AsRef<path::Path>>(path: P, verbose: bool) -> Result<Bsa<fs::File>, ReadError> {
     let file = fs::File::open(path)?;
-    let bsa = read(file)?;
+    let bsa = read(file, verbose)?;
     Ok(bsa)
+}
+
+macro_rules! log {
+    ($verbose:ident, $($rest:tt)*) => {
+        if $verbose {
+            std::eprintln!($($rest)*)
+        }
+    }
 }
 
 impl<R: io::Read + io::Seek> Bsa<R> {
@@ -656,13 +664,15 @@ impl<R: io::Read + io::Seek> Bsa<R> {
         self.header.folders.clone().into_iter()
     }
 
-    fn read_header(data: &mut R) -> Result<BsaHeader, ReadError> {
+    fn read_header(data: &mut R, verbose: bool) -> Result<BsaHeader, ReadError> {
         let mut magic = [0; 4];
         data.read_exact(&mut magic)?;
         if &magic != b"BSA\0" {
+            log!(verbose, "Expected the BSA file to begin with 'BSA\\0'");
             return Err(ReadError::MissingHeader);
         }
         let version_num = read_u32(data, None)?;
+        log!(verbose, "BSA v{}", version_num);
         let version = Version::deserialize(version_num)?;
         let offset = read_u32(data, None)?;
         if offset != 36 {
