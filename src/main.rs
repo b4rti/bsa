@@ -2,6 +2,7 @@ use std::{error, fs, io, path, process};
 
 mod bsa;
 mod cp1252;
+mod hash;
 
 fn setup_logger(verbose: bool) {
     let level = if verbose {
