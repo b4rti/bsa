@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
 use crate::cp1252;
-use flate2::read::ZlibDecoder;
 use log::{error, info, trace, warn};
-use lz4::Decoder;
 use std::{error, fmt, fs, io, path};
 
 #[non_exhaustive]
@@ -91,26 +89,22 @@ impl error::Error for WriteError {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum Version {
-    Oblivion,
-    Skyrim,
-    SkyrimSpecialEdition,
-}
+struct Version(u32);
 
 impl Version {
+    const OBLIVION: Version = Version(103);
+    const SKYRIM: Version = Version(104);
+    const SKYRIM_SPECIAL_EDITION: Version = Version(105);
+
     fn serialize(self) -> u32 {
-        match self {
-            Self::Oblivion => 103,
-            Self::Skyrim => 104,
-            Self::SkyrimSpecialEdition => 105,
-        }
+        self.0
     }
 
     fn deserialize(value: u32) -> Result<Self, ReadError> {
         Ok(match value {
-            103 => Self::Oblivion,
-            104 => Self::Skyrim,
-            105 => Self::SkyrimSpecialEdition,
+            103 => Self::OBLIVION,
+            104 => Self::SKYRIM,
+            105 => Self::SKYRIM_SPECIAL_EDITION,
             other => return Err(ReadError::UnknownVersion(other)),
         })
     }
@@ -443,7 +437,7 @@ impl File {
             data.seek(io::SeekFrom::Start(offset))?;
         }
         let name = None;
-        let name_offset = if archive_flags.embed_file_names && version != Version::Oblivion {
+        let name_offset = if archive_flags.embed_file_names && version != Version::OBLIVION {
             let length_byte = read_u8(data)?;
             data.seek(io::SeekFrom::Current(i64::from(length_byte)))?;
             u64::from(length_byte + 1)
@@ -495,10 +489,10 @@ impl File {
         );
         let file_reader = io::Read::take(reader, self.size);
         Ok(if self.compressed {
-            if self.version == Version::SkyrimSpecialEdition {
-                Box::new(Decoder::new(file_reader)?)
+            if self.version == Version::SKYRIM_SPECIAL_EDITION {
+                Box::new(lz4::Decoder::new(file_reader)?)
             } else {
-                Box::new(ZlibDecoder::new(file_reader))
+                Box::new(flate2::read::ZlibDecoder::new(file_reader))
             }
         } else {
             Box::new(file_reader)
@@ -697,9 +691,8 @@ impl<R: io::Read + io::Seek> Bsa<R> {
             let file_count = read_u32(data, Some(res.archive_flags))?;
             let old_file_offset = read_u32(data, Some(res.archive_flags))?;
             let offset = match res.version {
-                Version::Oblivion => u64::from(old_file_offset),
-                Version::Skyrim => u64::from(old_file_offset),
-                Version::SkyrimSpecialEdition => read_u64(data, Some(res.archive_flags))?,
+                Version::OBLIVION | Version::SKYRIM => u64::from(old_file_offset),
+                Version::SKYRIM_SPECIAL_EDITION => read_u64(data, Some(res.archive_flags))?,
                 _ => return Err(ReadError::FailedToReadFileOffset),
             };
             folder_records.push(FolderRecord {
@@ -833,7 +826,7 @@ mod tests {
     fn test_hash_calculation() {
         assert_eq!(
             super::compute_hash("textures/terrain/skuldafnworld"),
-            0xfd0d_bef7_41e6_c64
+            0x0fd0_dbef_741e_6c64
         );
         assert_eq!(
             super::compute_hash("textures/terrain/dlc2solstheimworld/objects"),
