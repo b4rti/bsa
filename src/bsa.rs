@@ -654,7 +654,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
         for folder_record in &mut folder_records {
             if res.archive_flags.include_directory_names {
                 let name = deserialize_bstring(data, true)?;
-                let computed_hash = hash::compute_hash(&name);
+                let computed_hash = hash::compute_hash(&name, hash::Type::Directory);
                 if computed_hash != folder_record.name_hash {
                     error!(
                         "Incorrect hash: calculated {:016x} instead of {:016x} for '{}'",
@@ -662,7 +662,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
                     );
                     return Err(ReadError::IncorrectHash(IncorrectHashError {
                         actual_hash: folder_record.name_hash,
-                        expected_hash: hash::compute_hash(&name),
+                        expected_hash: computed_hash,
                         name,
                     }));
                 } else {
@@ -692,7 +692,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
             for folder_record in &mut folder_records {
                 for file_record in &mut folder_record.file_records {
                     let file_name = deserialize_null_terminated_string(data)?;
-                    let computed_hash = hash::compute_hash(&file_name);
+                    let computed_hash = hash::compute_hash(&file_name, hash::Type::File);
                     if computed_hash != file_record.name_hash {
                         error!(
                             "Incorrect hash: calculated {:016x} instead of {:016x} for '{}'",
@@ -700,7 +700,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
                         );
                         return Err(ReadError::IncorrectHash(IncorrectHashError {
                             actual_hash: file_record.name_hash,
-                            expected_hash: hash::compute_hash(&file_name),
+                            expected_hash: computed_hash,
                             name: file_name,
                         }));
                     } else {

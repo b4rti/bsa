@@ -1,14 +1,21 @@
-pub(crate) fn compute_hash(name: &str) -> u64 {
+#[non_exhaustive]
+pub(crate) enum Type {
+    Directory,
+    File,
+}
+
+pub(crate) fn compute_hash(name: &str, t: Type) -> u64 {
     let name = name.replace('/', r"\");
-    if name.contains('\\') {
-        // no file extension if we're looking as a directory containing dot chars
-        return compute_hash_with_ext(name.as_bytes(), &[]);
-    }
-    if let Some(ext_idx) = name.rfind('.') {
-        let (name, ext) = name.split_at(ext_idx);
-        compute_hash_with_ext(name.as_bytes(), ext.as_bytes())
-    } else {
-        compute_hash_with_ext(name.as_bytes(), &[])
+    match t {
+        Type::Directory => compute_hash_with_ext(name.as_bytes(), &[]),
+        Type::File => {
+            if let Some(ext_idx) = name.rfind('.') {
+                let (name, ext) = name.split_at(ext_idx);
+                compute_hash_with_ext(name.as_bytes(), ext.as_bytes())
+            } else {
+                compute_hash_with_ext(name.as_bytes(), &[])
+            }
+        }
     }
 }
 
@@ -54,24 +61,32 @@ fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use super::{compute_hash, Type};
+
     #[test]
     fn test_hash_calculation() {
         assert_eq!(
-            super::compute_hash("textures/terrain/skuldafnworld"),
+            compute_hash("textures/terrain/skuldafnworld", Type::Directory),
             0x0fd0_dbef_741e_6c64
         );
         assert_eq!(
-            super::compute_hash("textures/terrain/dlc2solstheimworld/objects"),
+            compute_hash(
+                "textures/terrain/dlc2solstheimworld/objects",
+                Type::Directory
+            ),
             0xe38e_0b87_742b_7473
         );
         assert_eq!(
-            super::compute_hash("skuldafnworld.4.20.-5.dds"),
+            compute_hash("skuldafnworld.4.20.-5.dds", Type::Directory),
             0xa106_a998_7315_adb5
         );
         assert_eq!(
-            super::compute_hash(r"meshes\actors\character\facegendata\facegeom\update.esm"),
+            compute_hash(
+                r"meshes\actors\character\facegendata\facegeom\update.esm",
+                Type::Directory
+            ),
             0x7e7d_d467_6d37_736d
         );
-        assert_eq!(super::compute_hash("seq"), 0x7303_6571);
+        assert_eq!(compute_hash("seq", Type::Directory), 0x7303_6571);
     }
 }
