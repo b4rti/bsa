@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::cp1252;
+use flate2::read::ZlibDecoder;
 use log::{error, info, trace, warn};
 use lz4::Decoder;
 use std::{error, fmt, fs, io, path};
@@ -308,6 +309,7 @@ pub struct File {
     size: u64,
     compressed: bool,
     uncompressed_size: u64,
+    version: Version,
 }
 
 fn serialize_bstring(s: &str, zero: bool, vec: &mut Vec<u8>) -> Result<(), WriteError> {
@@ -424,6 +426,7 @@ impl File {
         offset: u64,
         size: u64,
         data: &mut (impl io::Read + io::Seek),
+        version: Version,
     ) -> Result<File, ReadError> {
         trace!(
             "Deserialising file at offset {}, size {}, compressed {}",
@@ -440,7 +443,7 @@ impl File {
             data.seek(io::SeekFrom::Start(offset))?;
         }
         let name = None;
-        let name_offset = if archive_flags.embed_file_names {
+        let name_offset = if archive_flags.embed_file_names && version != Version::Oblivion {
             let length_byte = read_u8(data)?;
             data.seek(io::SeekFrom::Current(i64::from(length_byte)))?;
             u64::from(length_byte + 1)
@@ -467,6 +470,7 @@ impl File {
             size: data_size,
             compressed,
             uncompressed_size,
+            version,
         })
     }
 
@@ -491,7 +495,11 @@ impl File {
         );
         let file_reader = io::Read::take(reader, self.size);
         Ok(if self.compressed {
-            Box::new(Decoder::new(file_reader)?)
+            if self.version == Version::SkyrimSpecialEdition {
+                Box::new(Decoder::new(file_reader)?)
+            } else {
+                Box::new(ZlibDecoder::new(file_reader))
+            }
         } else {
             Box::new(file_reader)
         })
@@ -689,6 +697,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
             let file_count = read_u32(data, Some(res.archive_flags))?;
             let old_file_offset = read_u32(data, Some(res.archive_flags))?;
             let offset = match res.version {
+                Version::Oblivion => u64::from(old_file_offset),
                 Version::Skyrim => u64::from(old_file_offset),
                 Version::SkyrimSpecialEdition => read_u64(data, Some(res.archive_flags))?,
                 _ => return Err(ReadError::FailedToReadFileOffset),
@@ -781,6 +790,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
                     file_record.offset.into(),
                     file_record.size.into(),
                     data,
+                    version,
                 )?;
                 if file.name.is_none() && file_record.name.is_some() {
                     file.name = file_record.name;
