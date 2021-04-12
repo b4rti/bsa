@@ -5,6 +5,8 @@ use log::{error, info, trace, warn};
 use lz4_flex;
 use std::{error, fmt, fs, io, path};
 
+use lz4::{Decoder, EncoderBuilder};
+
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum ReadError {
@@ -409,6 +411,7 @@ fn deserialize_null_terminated_string(bytes: &mut impl io::Read) -> Result<Strin
 pub enum FileReader<'a> {
     Dyn(Box<dyn io::Read + 'a>),
     Vec(Vec<u8>),
+    Compressed(Box<Decoder<FileReader<'a>>>),
 }
 
 impl io::Read for FileReader<'_> {
@@ -416,6 +419,7 @@ impl io::Read for FileReader<'_> {
         match self {
             Self::Dyn(r) => r.read(buf),
             Self::Vec(v) => v.as_slice().read(buf),
+            Self::Compressed(c) => c.read(buf),
         }
     }
 }
@@ -510,14 +514,23 @@ impl File {
                 self.size
             );
             reader.read_exact(&mut compressed_buffer[..])?;
-            match lz4_flex::decompress(&compressed_buffer[..], self.uncompressed_size as usize) {
-                Ok(data) => FileReader::Vec(data),
-                Err(e) => {
-                    error!("Decompression error: {}", e);
-                    FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
-                    //return Err(io::Error::new(io::ErrorKind::Other, "decompression error"));
-                }
-            }
+            let decoder = Decoder::new(FileReader::Dyn(Box::new(<&mut R as io::Read>::take(
+                reader, self.size,
+            ))))?;
+            FileReader::Compressed(Box::new(decoder))
+            // let mut f = fs::File::create("thing.txt")?;
+            // io::copy(&mut decoder, &mut f)?;
+            // <fs::File as io::Write>::write(&mut f, compressed_buffer.as_slice())?;
+            // FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
+            // FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
+            // match lz4_flex::decompress(&compressed_buffer[..], self.uncompressed_size as usize) {
+            //     Ok(data) => FileReader::Vec(data),
+            //     Err(e) => {
+            //         error!("Decompression error: {}", e);
+            //         FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
+            //         //return Err(io::Error::new(io::ErrorKind::Other, "decompression error"));
+            //     }
+            // }
         } else {
             FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
         })
