@@ -2,10 +2,8 @@
 
 use crate::cp1252;
 use log::{error, info, trace, warn};
-use lz4_flex;
+use lz4::Decoder;
 use std::{error, fmt, fs, io, path};
-
-use lz4::{Decoder, EncoderBuilder};
 
 #[non_exhaustive]
 #[derive(Debug)]
@@ -419,7 +417,12 @@ impl io::Read for FileReader<'_> {
         match self {
             Self::Dyn(r) => r.read(buf),
             Self::Vec(v) => v.as_slice().read(buf),
-            Self::Compressed(c) => c.read(buf),
+            Self::Compressed(c) => {
+                trace!("Reading {} from compressed", buf.len());
+                let r = c.read(buf);
+                trace!("read {:?}", r);
+                r
+            }
         }
     }
 }
@@ -507,13 +510,12 @@ impl File {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Ok(if self.compressed {
-            let mut compressed_buffer = vec![0; self.size as usize];
             info!(
                 "Reading from offset {}, size: {}",
                 reader.stream_position()?,
                 self.size
             );
-            reader.read_exact(&mut compressed_buffer[..])?;
+            //reader.read_exact(&mut compressed_buffer[..])?;
             let decoder = Decoder::new(FileReader::Dyn(Box::new(<&mut R as io::Read>::take(
                 reader, self.size,
             ))))?;
