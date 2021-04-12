@@ -406,27 +406,6 @@ fn deserialize_null_terminated_string(bytes: &mut impl io::Read) -> Result<Strin
     Ok(decoded_name)
 }
 
-pub enum FileReader<'a> {
-    Dyn(Box<dyn io::Read + 'a>),
-    Vec(Vec<u8>),
-    Compressed(Box<Decoder<FileReader<'a>>>),
-}
-
-impl io::Read for FileReader<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            Self::Dyn(r) => r.read(buf),
-            Self::Vec(v) => v.as_slice().read(buf),
-            Self::Compressed(c) => {
-                trace!("Reading {} from compressed", buf.len());
-                let r = c.read(buf);
-                trace!("read {:?}", r);
-                r
-            }
-        }
-    }
-}
-
 impl File {
     // fn serialize(&self, archive_flags: ArchiveFlags, compress: bool) -> Result<io::Chain<&[u8], &mut R>, WriteError> {
     //     if compress {
@@ -503,10 +482,10 @@ impl File {
         }
     }
 
-    pub fn read_contents<R: io::Read + io::Seek>(
+    pub fn read_contents<'a, R: io::Read + io::Seek>(
         self,
-        bsa: &mut Bsa<R>,
-    ) -> Result<FileReader, io::Error> {
+        bsa: &'a mut Bsa<R>,
+    ) -> Result<Box<dyn io::Read + 'a>, io::Error> {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Ok(if self.compressed {
@@ -515,26 +494,10 @@ impl File {
                 reader.stream_position()?,
                 self.size
             );
-            //reader.read_exact(&mut compressed_buffer[..])?;
-            let decoder = Decoder::new(FileReader::Dyn(Box::new(<&mut R as io::Read>::take(
-                reader, self.size,
-            ))))?;
-            FileReader::Compressed(Box::new(decoder))
-            // let mut f = fs::File::create("thing.txt")?;
-            // io::copy(&mut decoder, &mut f)?;
-            // <fs::File as io::Write>::write(&mut f, compressed_buffer.as_slice())?;
-            // FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
-            // FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
-            // match lz4_flex::decompress(&compressed_buffer[..], self.uncompressed_size as usize) {
-            //     Ok(data) => FileReader::Vec(data),
-            //     Err(e) => {
-            //         error!("Decompression error: {}", e);
-            //         FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
-            //         //return Err(io::Error::new(io::ErrorKind::Other, "decompression error"));
-            //     }
-            // }
+            let decoder = Decoder::new(<&mut R as io::Read>::take(reader, self.size))?;
+            Box::new(decoder)
         } else {
-            FileReader::Dyn(Box::new(<&mut R as io::Read>::take(reader, self.size)))
+            Box::new(<&mut R as io::Read>::take(reader, self.size))
         })
     }
 }
