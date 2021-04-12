@@ -488,16 +488,16 @@ impl File {
     ) -> Result<Box<dyn io::Read + 'a>, io::Error> {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
+        info!(
+            "Reading from offset {}, size: {}",
+            reader.stream_position()?,
+            self.size
+        );
+        let file_reader = <&mut R as io::Read>::take(reader, self.size);
         Ok(if self.compressed {
-            info!(
-                "Reading from offset {}, size: {}",
-                reader.stream_position()?,
-                self.size
-            );
-            let decoder = Decoder::new(<&mut R as io::Read>::take(reader, self.size))?;
-            Box::new(decoder)
+            Box::new(Decoder::new(file_reader)?)
         } else {
-            Box::new(<&mut R as io::Read>::take(reader, self.size))
+            Box::new(file_reader)
         })
     }
 }
