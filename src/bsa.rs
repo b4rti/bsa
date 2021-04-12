@@ -612,7 +612,7 @@ fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
         b".kf" => hash1 |= 0x80,
         b".nif" => hash1 |= 0x8000,
         b".dds" => hash1 |= 0x8080,
-        b".wav" => hash1 |= 0x80000000,
+        b".wav" => hash1 |= 0x8000_0000,
         _ => (),
     }
     let mut hash2 = 0_u32;
@@ -769,7 +769,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
                 files: vec![],
             };
             for file_record in folder_record.file_records {
-                let override_compressed: bool = file_record.size & 0x40000000 != 0;
+                let override_compressed: bool = file_record.size & 0x4000_0000 != 0;
                 if override_compressed {
                     warn!("override_compressed is set");
                 }
@@ -823,20 +823,20 @@ mod tests {
     fn test_hash_calculation() {
         assert_eq!(
             super::compute_hash("textures/terrain/skuldafnworld"),
-            0xfd0dbef741e6c64
+            0xfd0d_bef7_41e6_c64
         );
         assert_eq!(
             super::compute_hash("textures/terrain/dlc2solstheimworld/objects"),
-            0xe38e0b87742b7473
+            0xe38e_0b87_742b_7473
         );
         assert_eq!(
             super::compute_hash("skuldafnworld.4.20.-5.dds"),
-            0xa106a9987315adb5
+            0xa106_a998_7315_adb5
         );
         assert_eq!(
             super::compute_hash(r"meshes\actors\character\facegendata\facegeom\update.esm"),
-            0x7e7dd4676d37736d
+            0x7e7d_d467_6d37_736d
         );
-        assert_eq!(super::compute_hash("seq"), 0x73036571);
+        assert_eq!(super::compute_hash("seq"), 0x7303_6571);
     }
 }
