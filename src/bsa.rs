@@ -493,7 +493,7 @@ impl File {
             reader.stream_position()?,
             self.size
         );
-        let file_reader = <&mut R as io::Read>::take(reader, self.size);
+        let file_reader = io::Read::take(reader, self.size);
         Ok(if self.compressed {
             Box::new(Decoder::new(file_reader)?)
         } else {
