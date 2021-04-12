@@ -323,10 +323,10 @@ fn serialize_bstring(s: &str, zero: bool, vec: &mut Vec<u8>) -> Result<(), Write
     } else {
         encoded_str.len()
     };
-    if length > 255 {
-        return Err(WriteError::FileNameMoreThan255Characters);
+    match std::convert::TryInto::<u8>::try_into(length) {
+        Ok(length) => vec.push(length),
+        Err(_) => return Err(WriteError::FileNameMoreThan255Characters),
     }
-    vec.push(length as u8);
     for b in encoded_str {
         vec.push(b);
     }
@@ -370,11 +370,7 @@ fn read_u64(
 
 fn deserialize_bstring(bytes: &mut impl io::Read, zero: bool) -> Result<String, ReadError> {
     let length_byte = read_u8(bytes)?;
-    let name_length = if zero {
-        length_byte as usize - 1
-    } else {
-        length_byte as usize
-    };
+    let name_length = usize::from(length_byte) - if zero { 1 } else { 0 };
     let mut encoded_filename = vec![0; name_length];
     bytes.read_exact(&mut encoded_filename)?;
     let mut decoded_name = String::new();
@@ -446,11 +442,11 @@ impl File {
         let name = None;
         let name_offset = if archive_flags.embed_file_names {
             let length_byte = read_u8(data)?;
-            data.seek(io::SeekFrom::Current(length_byte as i64))?;
-            length_byte + 1
+            data.seek(io::SeekFrom::Current(i64::from(length_byte)))?;
+            u64::from(length_byte + 1)
         } else {
-            0 as u8
-        } as u64;
+            0
+        };
         let data_size = (if compressed { size - 4 } else { size }) - name_offset;
         let uncompressed_size = if compressed {
             let original_size = read_u32(data, Some(archive_flags))?;
@@ -458,7 +454,7 @@ impl File {
                 "compressed size {}, uncompressed size {}",
                 data_size, original_size
             );
-            original_size as u64
+            u64::from(original_size)
         } else {
             data_size
         };
