@@ -4,6 +4,8 @@ mod bsa;
 mod cp1252;
 mod hash;
 
+type Res<T> = Result<T, Box<dyn error::Error + Send + Sync + 'static>>;
+
 fn setup_logger(verbose: bool) {
     let level = if verbose {
         log::LevelFilter::max()
@@ -15,7 +17,7 @@ fn setup_logger(verbose: bool) {
         .init();
 }
 
-fn ls(file: &path::Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn ls(file: &path::Path) -> Res<()> {
     let bsa = bsa::open(file)?;
     for folder in bsa.folders() {
         if let Some(folder_name) = folder.name() {
@@ -29,10 +31,7 @@ fn ls(file: &path::Path) -> Result<(), Box<dyn error::Error + Send + Sync + 'sta
     Ok(())
 }
 
-fn cat(
-    bsa_file: &path::Path,
-    path: &str,
-) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn cat(bsa_file: &path::Path, path: &str) -> Res<()> {
     let path = if path.find('/').is_some() {
         path.replace('/', "\\")
     } else {
@@ -61,10 +60,7 @@ fn cat(
     Ok(())
 }
 
-fn extract(
-    bsa_files: &[path::PathBuf],
-    into: Option<&path::Path>,
-) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn extract(bsa_files: &[path::PathBuf], into: Option<&path::Path>) -> Res<()> {
     let base_extract_dir = if let Some(into) = into {
         path::PathBuf::from(into)
     } else {
@@ -107,10 +103,7 @@ fn extract(
     Ok(())
 }
 
-fn validate_file(
-    bsa_file: &path::Path,
-    fast: i32,
-) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn validate_file(bsa_file: &path::Path, fast: i32) -> Res<()> {
     let mut buf = [0; 16];
     let mut bsa = bsa::open(bsa_file)?;
     for folder in bsa.folders() {
@@ -136,7 +129,7 @@ fn validate(bsa_files: &[path::PathBuf], fast: i32) {
     }
 }
 
-fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+fn run() -> Res<()> {
     let args = <Cli as structopt::StructOpt>::from_args();
     match args {
         Cli::Ls { file, verbose } => {
