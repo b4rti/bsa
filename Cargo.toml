@@ -1,6 +1,6 @@
 [package]
 name = "bsa"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["printfn <printfn@users.noreply.github.com>"]
 edition = "2018"
 license = "CC0-1.0"
