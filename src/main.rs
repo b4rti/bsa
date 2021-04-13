@@ -204,6 +204,7 @@ enum Cli {
         /// Enable verbose output
         #[structopt(short, long)]
         verbose: bool,
+        /// Skip slow validation checks (specify this option twice for even faster validation)
         #[structopt(long, parse(from_occurrences))]
         fast: i32,
     },
