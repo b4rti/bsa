@@ -7,6 +7,7 @@ use std::{error, fmt, fs, io, path};
 trait ReadSeek: io::Read + io::Seek {}
 impl<T: io::Read + io::Seek> ReadSeek for T {}
 
+/// Represents an error when reading a BSA file
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum ReadError {
@@ -313,6 +314,7 @@ impl FileFlags {
     }
 }
 
+/// Represents a file inside a BSA
 #[derive(Clone)]
 pub struct File {
     name: Option<String>,
@@ -485,6 +487,7 @@ impl File {
         })
     }
 
+    /// Returns the file name
     pub fn name(&self) -> Option<&str> {
         if let Some(name) = &self.name {
             Some(name.as_str())
@@ -493,6 +496,7 @@ impl File {
         }
     }
 
+    /// Returns a reader for the contents of this BSA file.
     pub fn read_contents<'a>(&self, bsa: &'a mut Bsa) -> Result<Box<dyn io::Read + 'a>, ReadError> {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
@@ -514,8 +518,17 @@ impl File {
             Box::new(file_reader)
         })
     }
+
+    /// Reads the contents of this BSA file, and returns the result as a `Vec<u8>`.
+    pub fn read_to_vec(&self, bsa: &mut Bsa) -> Result<Vec<u8>, ReadError> {
+        let mut reader = self.read_contents(bsa)?;
+        let mut res = vec![];
+        reader.read_to_end(&mut res)?;
+        Ok(res)
+    }
 }
 
+/// Represents a folder inside a BSA file
 #[derive(Debug, Clone)]
 pub struct Folder {
     name: Option<String>,
@@ -523,14 +536,12 @@ pub struct Folder {
 }
 
 impl Folder {
+    /// Returns a list of files in this BSA folder
     pub fn files(&self) -> impl Iterator<Item = &File> {
         self.files.iter()
     }
 
-    pub fn files_mut(&mut self) -> impl Iterator<Item = &mut File> {
-        self.files.iter_mut()
-    }
-
+    /// Returns the file name
     pub fn name(&self) -> Option<&str> {
         if let Some(name) = &self.name {
             Some(name.as_str())
@@ -562,6 +573,7 @@ struct BsaHeader {
     folders: Vec<Folder>,
 }
 
+/// Represents a BSA file
 pub struct Bsa {
     header: BsaHeader,
     reader: Box<dyn ReadSeek>,
@@ -594,6 +606,7 @@ struct FileRecord {
     name: Option<String>,
 }
 
+/// Opens the specified BSA file from a reader
 pub fn read<R: io::Read + io::Seek + 'static>(mut data: R) -> Result<Bsa, ReadError> {
     let header = Bsa::read_header(&mut data)?;
     Ok(Bsa {
@@ -602,6 +615,23 @@ pub fn read<R: io::Read + io::Seek + 'static>(mut data: R) -> Result<Bsa, ReadEr
     })
 }
 
+/// Opens the specified BSA file.
+///
+/// ```no_run
+/// use std::error::Error;
+///
+/// fn main() -> Result<(), Box<dyn Error>> {
+///     let mut bsa = bsa::open("file.bsa")?;
+///     for folder in bsa.folders() {
+///         for file in folder.files() {
+///             println!("File {:?} in folder {:?}", file.name(), folder.name());
+///             let contents = file.read_to_vec(&mut bsa)?;
+///             println!("{:?}", &contents);
+///         }
+///     }
+///     Ok(())
+/// }
+/// ```
 pub fn open<P: AsRef<path::Path>>(path: P) -> Result<Bsa, ReadError> {
     let file = fs::File::open(path)?;
     let bsa = read(file)?;
@@ -609,6 +639,7 @@ pub fn open<P: AsRef<path::Path>>(path: P) -> Result<Bsa, ReadError> {
 }
 
 impl Bsa {
+    /// Returns a list of folders in this BSA
     pub fn folders(&self) -> impl Iterator<Item = Folder> {
         self.header.folders.clone().into_iter()
     }

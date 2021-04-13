@@ -198,7 +198,7 @@ enum Cli {
         #[structopt(short, long)]
         verbose: bool,
     },
-    /// Validate one or more BSA files
+    /// Validate BSA files
     Validate {
         /// Input file(s) to validate
         #[structopt(parse(from_os_str), min_values = 1, required = true)]
