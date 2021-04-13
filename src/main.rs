@@ -62,29 +62,31 @@ fn cat(
 }
 
 fn extract(
-    bsa_file: &path::Path,
+    bsa_files: &[path::PathBuf],
     into: Option<&path::Path>,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
-    let mut bsa = bsa::open(bsa_file)?;
-    for folder in bsa.folders() {
-        if folder.name().is_some() {
-            let folder_name = folder.name().unwrap();
-            let mut concat_folder = if let Some(into) = into {
-                path::PathBuf::from(into)
-            } else {
-                path::PathBuf::new()
-            };
-            for folder_part in folder_name.split('\\') {
-                concat_folder.push(folder_part);
-            }
-            fs::create_dir_all(&concat_folder)?;
-            for file in folder.files() {
-                if let Some(file_name) = file.name() {
-                    let mut file_path = concat_folder.clone();
-                    file_path.push(file_name);
-                    let mut output_file = fs::File::create(&file_path)?;
-                    println!("Creating {:?}", &file_path);
-                    io::copy(&mut file.read_contents(&mut bsa)?, &mut output_file)?;
+    for bsa_file in bsa_files {
+        let mut bsa = bsa::open(bsa_file)?;
+        for folder in bsa.folders() {
+            if folder.name().is_some() {
+                let folder_name = folder.name().unwrap();
+                let mut concat_folder = if let Some(into) = into {
+                    path::PathBuf::from(into)
+                } else {
+                    path::PathBuf::new()
+                };
+                for folder_part in folder_name.split('\\') {
+                    concat_folder.push(folder_part);
+                }
+                fs::create_dir_all(&concat_folder)?;
+                for file in folder.files() {
+                    if let Some(file_name) = file.name() {
+                        let mut file_path = concat_folder.clone();
+                        file_path.push(file_name);
+                        let mut output_file = fs::File::create(&file_path)?;
+                        println!("Creating {:?}", &file_path);
+                        io::copy(&mut file.read_contents(&mut bsa)?, &mut output_file)?;
+                    }
                 }
             }
         }
@@ -131,15 +133,15 @@ fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
             cat(&file, &path)?
         }
         Cli::Extract {
-            file,
+            files,
             into,
             verbose,
         } => {
             setup_logger(verbose);
             if let Some(into) = into {
-                extract(&file, Some(&into))?
+                extract(&files, Some(&into))?
             } else {
-                extract(&file, None)?
+                extract(&files, None)?
             }
         }
         Cli::Validate { files, verbose } => {
@@ -174,9 +176,9 @@ enum Cli {
     },
     /// Extract all files from a BSA
     Extract {
-        /// Input file
-        #[structopt(parse(from_os_str))]
-        file: path::PathBuf,
+        /// Input file(s) to extract
+        #[structopt(parse(from_os_str), min_values = 1, required = true)]
+        files: Vec<path::PathBuf>,
         /// Directory to extract into
         #[structopt(parse(from_os_str), long)]
         into: Option<path::PathBuf>,
