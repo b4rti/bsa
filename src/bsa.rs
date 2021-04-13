@@ -494,7 +494,7 @@ impl File {
             } else if self.version == Version::SKYRIM || self.version == Version::OBLIVION {
                 Box::new(flate2::read::ZlibDecoder::new(file_reader))
             } else {
-                return Err(ReadError::UnknownCompressionAlgorithm)
+                return Err(ReadError::UnknownCompressionAlgorithm);
             }
         } else {
             Box::new(file_reader)
