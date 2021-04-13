@@ -1,4 +1,5 @@
-#![allow(dead_code)]
+// clippy is bad
+#![allow(dead_code, clippy::manual_map)]
 
 use crate::{cp1252, hash};
 use log::{error, info, trace, warn};
