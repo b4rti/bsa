@@ -1,4 +1,4 @@
-use std::{error, fs, io, path, process};
+use std::{error, fmt, fs, io, path, process};
 
 mod bsa;
 mod cp1252;
@@ -46,10 +46,7 @@ fn cat(
                 if let Some(file_name) = file.name() {
                     let combined_name = format!("{}\\{}", folder_name, file_name);
                     if path == combined_name {
-                        io::copy(
-                            &mut file.clone().read_contents(&mut bsa)?,
-                            &mut io::stdout().lock(),
-                        )?;
+                        io::copy(&mut file.read_contents(&mut bsa)?, &mut io::stdout().lock())?;
                         return Ok(());
                     }
                 }
@@ -87,12 +84,35 @@ fn extract(
                     file_path.push(file_name);
                     let mut output_file = fs::File::create(&file_path)?;
                     println!("Creating {:?}", &file_path);
-                    io::copy(&mut file.clone().read_contents(&mut bsa)?, &mut output_file)?;
+                    io::copy(&mut file.read_contents(&mut bsa)?, &mut output_file)?;
                 }
             }
         }
     }
     Ok(())
+}
+
+fn validate_file(
+    bsa_file: &path::Path,
+) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+    let mut buf = [0; 16];
+    let mut bsa = bsa::open(bsa_file)?;
+    for folder in bsa.folders() {
+        for file in folder.files() {
+            let _ = file.read_contents(&mut bsa)?.read(&mut buf)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate(bsa_files: &[path::PathBuf]) {
+    for bsa_file in bsa_files {
+        eprint!("{}", bsa_file.to_string_lossy());
+        match validate_file(bsa_file) {
+            Ok(()) => eprintln!(": OK"),
+            Err(e) => eprintln!(": {}", error_chain(e.as_ref())),
+        }
+    }
 }
 
 fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
@@ -121,6 +141,10 @@ fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
             } else {
                 extract(&file, None)?
             }
+        }
+        Cli::Validate { files, verbose } => {
+            setup_logger(verbose);
+            validate(&files);
         }
     }
     Ok(())
@@ -160,22 +184,32 @@ enum Cli {
         #[structopt(short, long)]
         verbose: bool,
     },
+    /// Validate one or more BSA files
+    Validate {
+        /// Input file(s) to validate
+        #[structopt(parse(from_os_str), min_values = 1, required = true)]
+        files: Vec<path::PathBuf>,
+        /// Enable verbose output
+        #[structopt(short, long)]
+        verbose: bool,
+    },
 }
 
-fn print_error_chain(mut err: &dyn error::Error) {
-    eprint!("{}", err);
+fn error_chain(mut err: &dyn error::Error) -> impl fmt::Display {
+    let mut s = err.to_string();
     while let Some(inner) = err.source() {
-        eprint!(": {}", inner);
+        s.push_str(": ");
+        s.push_str(&inner.to_string());
         err = inner;
     }
-    eprintln!();
+    s
 }
 
 fn main() {
     match run() {
         Ok(()) => (),
         Err(err) => {
-            print_error_chain(err.as_ref());
+            eprintln!("{}", error_chain(err.as_ref()));
             process::exit(1);
         }
     }

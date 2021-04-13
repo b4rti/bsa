@@ -13,6 +13,7 @@ pub enum ReadError {
     UnexpectedFolderRecordOffset,
     UnknownCompressionAlgorithm,
     ExpectedNullByte,
+    UnexpectedEndOfFile,
     FailedToReadFileOffset,
     ReaderError(io::Error),
     IncorrectHash(IncorrectHashError),
@@ -33,6 +34,7 @@ impl fmt::Display for ReadError {
             Self::UnexpectedFolderRecordOffset => write!(f, "Unexpected folder record offset"),
             Self::UnknownCompressionAlgorithm => write!(f, "Unknown compression algorithm"),
             Self::ExpectedNullByte => write!(f, "Expected a null byte"),
+            Self::UnexpectedEndOfFile => write!(f, "Unexpected end of file"),
             Self::FailedToReadFileOffset => write!(f, "Failed to read file offset"),
             Self::ReaderError(_) => write!(f, "Error reading file"),
             Self::IncorrectHash(err) => write!(
@@ -55,7 +57,11 @@ impl error::Error for ReadError {
 
 impl From<io::Error> for ReadError {
     fn from(e: io::Error) -> Self {
-        Self::ReaderError(e)
+        if e.kind() == io::ErrorKind::UnexpectedEof {
+            Self::UnexpectedEndOfFile
+        } else {
+            Self::ReaderError(e)
+        }
     }
 }
 
@@ -478,7 +484,7 @@ impl File {
     }
 
     pub fn read_contents<'a, R: io::Read + io::Seek>(
-        self,
+        &self,
         bsa: &'a mut Bsa<R>,
     ) -> Result<Box<dyn io::Read + 'a>, ReadError> {
         let reader = &mut bsa.reader;
