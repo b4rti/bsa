@@ -65,16 +65,29 @@ fn extract(
     bsa_files: &[path::PathBuf],
     into: Option<&path::Path>,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
+    let base_extract_dir = if let Some(into) = into {
+        path::PathBuf::from(into)
+    } else {
+        path::PathBuf::new()
+    };
     for bsa_file in bsa_files {
         let mut bsa = bsa::open(bsa_file)?;
+        let mut concat_folder = path::PathBuf::new();
+        for part in &base_extract_dir {
+            if part == "-" {
+                if let Some(file_stem) = bsa_file.file_stem() {
+                    concat_folder.push(file_stem);
+                } else {
+                    concat_folder.push(part);
+                }
+            } else {
+                concat_folder.push(part);
+            }
+        }
         for folder in bsa.folders() {
             if folder.name().is_some() {
                 let folder_name = folder.name().unwrap();
-                let mut concat_folder = if let Some(into) = into {
-                    path::PathBuf::from(into)
-                } else {
-                    path::PathBuf::new()
-                };
+                let mut concat_folder = concat_folder.clone();
                 for folder_part in folder_name.split('\\') {
                     concat_folder.push(folder_part);
                 }
@@ -144,11 +157,7 @@ fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
             verbose,
         } => {
             setup_logger(verbose);
-            if let Some(into) = into {
-                extract(&files, Some(&into))?
-            } else {
-                extract(&files, None)?
-            }
+            extract(&files, into.as_deref())?;
         }
         Cli::Validate {
             files,
@@ -189,7 +198,7 @@ enum Cli {
         /// Input file(s) to extract
         #[structopt(parse(from_os_str), min_values = 1, required = true)]
         files: Vec<path::PathBuf>,
-        /// Directory to extract into
+        /// Directory to extract into (specify '-' to name the directory based on the BSA file name)
         #[structopt(parse(from_os_str), long)]
         into: Option<path::PathBuf>,
         /// Enable verbose output
