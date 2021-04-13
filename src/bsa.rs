@@ -4,6 +4,9 @@ use crate::{cp1252, hash};
 use log::{error, info, trace, warn};
 use std::{error, fmt, fs, io, path};
 
+trait ReadSeek: io::Read + io::Seek {}
+impl<T: io::Read + io::Seek> ReadSeek for T {}
+
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum ReadError {
@@ -490,10 +493,7 @@ impl File {
         }
     }
 
-    pub fn read_contents<'a, R: io::Read + io::Seek>(
-        &self,
-        bsa: &'a mut Bsa<R>,
-    ) -> Result<Box<dyn io::Read + 'a>, ReadError> {
+    pub fn read_contents<'a>(&self, bsa: &'a mut Bsa) -> Result<Box<dyn io::Read + 'a>, ReadError> {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
         info!(
@@ -562,12 +562,12 @@ struct BsaHeader {
     folders: Vec<Folder>,
 }
 
-pub struct Bsa<R: io::Read> {
+pub struct Bsa {
     header: BsaHeader,
-    reader: R,
+    reader: Box<dyn ReadSeek>,
 }
 
-impl<R: io::Read> fmt::Debug for Bsa<R> {
+impl fmt::Debug for Bsa {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:#?}", self.header)
     }
@@ -594,26 +594,28 @@ struct FileRecord {
     name: Option<String>,
 }
 
-pub fn read<R: io::Read + io::Seek>(mut data: R) -> Result<Bsa<R>, ReadError> {
+pub fn read<R: io::Read + io::Seek + 'static>(mut data: R) -> Result<Bsa, ReadError> {
     let header = Bsa::read_header(&mut data)?;
     Ok(Bsa {
         header,
-        reader: data,
+        reader: Box::new(data),
     })
 }
 
-pub fn open<P: AsRef<path::Path>>(path: P) -> Result<Bsa<fs::File>, ReadError> {
+pub fn open<P: AsRef<path::Path>>(path: P) -> Result<Bsa, ReadError> {
     let file = fs::File::open(path)?;
     let bsa = read(file)?;
     Ok(bsa)
 }
 
-impl<R: io::Read + io::Seek> Bsa<R> {
+impl Bsa {
     pub fn folders(&self) -> impl Iterator<Item = Folder> {
         self.header.folders.clone().into_iter()
     }
 
-    fn read_header(data: &mut R) -> Result<BsaHeader, ReadError> {
+    fn read_header(
+        data: &mut (impl io::Read + io::Seek + 'static),
+    ) -> Result<BsaHeader, ReadError> {
         let mut magic = [0; 4];
         data.read_exact(&mut magic)?;
         if &magic != b"BSA\0" {
