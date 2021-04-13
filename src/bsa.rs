@@ -576,6 +576,7 @@ struct FolderRecord {
 struct FileRecord {
     name_hash: u64,
     size: u32,
+    override_compressed: bool,
     offset: u32,
     name: Option<String>,
 }
@@ -683,7 +684,8 @@ impl<R: io::Read + io::Seek> Bsa<R> {
                 let offset = read_u32(data, Some(res.archive_flags))?;
                 folder_record.file_records.push(FileRecord {
                     name_hash,
-                    size,
+                    size: size & 0x3fff_ffff,
+                    override_compressed: size & 0x4000_0000 != 0,
                     offset,
                     name: None,
                 });
@@ -720,11 +722,11 @@ impl<R: io::Read + io::Seek> Bsa<R> {
                 files: vec![],
             };
             for file_record in folder_record.file_records {
-                let override_compressed: bool = file_record.size & 0x4000_0000 != 0;
-                if override_compressed {
+                if file_record.override_compressed {
                     warn!("override_compressed is set");
                 }
-                let compressed = archive_flags.compressed_archive != override_compressed;
+                let compressed =
+                    archive_flags.compressed_archive != file_record.override_compressed;
 
                 let mut file = File::deserialize(
                     res.archive_flags,
