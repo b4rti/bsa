@@ -10,7 +10,7 @@ pub enum ReadError {
     MissingHeader,
     UnknownVersion(u32),
     UnexpectedFolderRecordOffset,
-    CompressionUnsupported,
+    UnknownCompressionAlgorithm,
     ExpectedNullByte,
     FailedToReadFileOffset,
     ReaderError(io::Error),
@@ -30,7 +30,7 @@ impl fmt::Display for ReadError {
             Self::MissingHeader => write!(f, "BSA file header is missing or invalid"),
             Self::UnknownVersion(value) => write!(f, "Unknown BSA version: {}", value),
             Self::UnexpectedFolderRecordOffset => write!(f, "Unexpected folder record offset"),
-            Self::CompressionUnsupported => write!(f, "Compression is not currently supported"),
+            Self::UnknownCompressionAlgorithm => write!(f, "Unknown compression algorithm"),
             Self::ExpectedNullByte => write!(f, "Expected a null byte"),
             Self::FailedToReadFileOffset => write!(f, "Failed to read file offset"),
             Self::ReaderError(_) => write!(f, "Error reading file"),
@@ -479,7 +479,7 @@ impl File {
     pub fn read_contents<'a, R: io::Read + io::Seek>(
         self,
         bsa: &'a mut Bsa<R>,
-    ) -> Result<Box<dyn io::Read + 'a>, io::Error> {
+    ) -> Result<Box<dyn io::Read + 'a>, ReadError> {
         let reader = &mut bsa.reader;
         reader.seek(io::SeekFrom::Start(self.offset))?;
         info!(
@@ -491,8 +491,10 @@ impl File {
         Ok(if self.compressed {
             if self.version == Version::SKYRIM_SPECIAL_EDITION {
                 Box::new(lz4::Decoder::new(file_reader)?)
-            } else {
+            } else if self.version == Version::SKYRIM || self.version == Version::OBLIVION {
                 Box::new(flate2::read::ZlibDecoder::new(file_reader))
+            } else {
+                return Err(ReadError::UnknownCompressionAlgorithm)
             }
         } else {
             Box::new(file_reader)

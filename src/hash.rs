@@ -77,7 +77,7 @@ mod tests {
             0xe38e_0b87_742b_7473
         );
         assert_eq!(
-            compute_hash("skuldafnworld.4.20.-5.dds", Type::Directory),
+            compute_hash("skuldafnworld.4.20.-5.dds", Type::File),
             0xa106_a998_7315_adb5
         );
         assert_eq!(
