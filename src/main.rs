@@ -96,21 +96,27 @@ fn extract(
 
 fn validate_file(
     bsa_file: &path::Path,
+    fast: i32,
 ) -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
     let mut buf = [0; 16];
     let mut bsa = bsa::open(bsa_file)?;
     for folder in bsa.folders() {
         for file in folder.files() {
-            let _ = file.read_contents(&mut bsa)?.read(&mut buf)?;
+            if fast < 2 {
+                let mut reader = file.read_contents(&mut bsa)?;
+                if fast == 0 {
+                    let _ = reader.read(&mut buf)?;
+                }
+            }
         }
     }
     Ok(())
 }
 
-fn validate(bsa_files: &[path::PathBuf]) {
+fn validate(bsa_files: &[path::PathBuf], fast: i32) {
     for bsa_file in bsa_files {
         eprint!("{}", bsa_file.to_string_lossy());
-        match validate_file(bsa_file) {
+        match validate_file(bsa_file, fast) {
             Ok(()) => eprintln!(": OK"),
             Err(e) => eprintln!(": {}", error_chain(e.as_ref())),
         }
@@ -144,9 +150,13 @@ fn run() -> Result<(), Box<dyn error::Error + Send + Sync + 'static>> {
                 extract(&files, None)?
             }
         }
-        Cli::Validate { files, verbose } => {
+        Cli::Validate {
+            files,
+            verbose,
+            fast,
+        } => {
             setup_logger(verbose);
-            validate(&files);
+            validate(&files, fast);
         }
     }
     Ok(())
@@ -194,6 +204,8 @@ enum Cli {
         /// Enable verbose output
         #[structopt(short, long)]
         verbose: bool,
+        #[structopt(long, parse(from_occurrences))]
+        fast: i32,
     },
 }
 
