@@ -29,6 +29,14 @@ pub fn encode_char(ch: char) -> Result<u8, EncodingError> {
     }
 }
 
+pub fn encode_str(s: &str) -> Result<Vec<u8>, EncodingError> {
+    let mut res = vec![];
+    for ch in s.chars() {
+        res.push(encode_char(ch)?);
+    }
+    Ok(res)
+}
+
 pub fn decode_byte(b: u8) -> char {
     if b <= 0x7f {
         char::from(b)

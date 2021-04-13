@@ -1,22 +1,24 @@
+use crate::cp1252;
+
 #[non_exhaustive]
 pub(crate) enum Type {
     Directory,
     File,
 }
 
-pub(crate) fn compute_hash(name: &str, t: Type) -> u64 {
+pub(crate) fn compute_hash(name: &str, t: Type) -> Result<u64, cp1252::EncodingError> {
     let name = name.replace('/', r"\");
-    match t {
-        Type::Directory => compute_hash_with_ext(name.as_bytes(), &[]),
+    Ok(match t {
+        Type::Directory => compute_hash_with_ext(&cp1252::encode_str(&name)?, &[]),
         Type::File => {
             if let Some(ext_idx) = name.rfind('.') {
                 let (name, ext) = name.split_at(ext_idx);
-                compute_hash_with_ext(name.as_bytes(), ext.as_bytes())
+                compute_hash_with_ext(&cp1252::encode_str(&name)?, &cp1252::encode_str(&ext)?)
             } else {
-                compute_hash_with_ext(name.as_bytes(), &[])
+                compute_hash_with_ext(&cp1252::encode_str(&name)?, &[])
             }
         }
-    }
+    })
 }
 
 fn compute_hash_with_ext(name: &[u8], ext: &[u8]) -> u64 {
@@ -64,29 +66,34 @@ mod tests {
     use super::{compute_hash, Type};
 
     #[test]
-    fn test_hash_calculation() {
+    fn test_hash_calculation() -> Result<(), crate::cp1252::EncodingError> {
         assert_eq!(
-            compute_hash("textures/terrain/skuldafnworld", Type::Directory),
+            compute_hash("textures/terrain/skuldafnworld", Type::Directory)?,
             0x0fd0_dbef_741e_6c64
         );
         assert_eq!(
             compute_hash(
                 "textures/terrain/dlc2solstheimworld/objects",
                 Type::Directory
-            ),
+            )?,
             0xe38e_0b87_742b_7473
         );
         assert_eq!(
-            compute_hash("skuldafnworld.4.20.-5.dds", Type::File),
+            compute_hash("skuldafnworld.4.20.-5.dds", Type::File)?,
             0xa106_a998_7315_adb5
         );
         assert_eq!(
             compute_hash(
                 r"meshes\actors\character\facegendata\facegeom\update.esm",
                 Type::Directory
-            ),
+            )?,
             0x7e7d_d467_6d37_736d
         );
-        assert_eq!(compute_hash("seq", Type::Directory), 0x7303_6571);
+        assert_eq!(compute_hash("seq", Type::Directory)?, 0x7303_6571);
+        assert_eq!(
+            compute_hash("dlc2mq05__0003c745_1\u{a0}.fuz", Type::File)?,
+            0x9482_28c0_6415_31a0
+        );
+        Ok(())
     }
 }

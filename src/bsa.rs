@@ -15,6 +15,7 @@ pub enum ReadError {
     UnexpectedEndOfFile,
     FailedToReadFileOffset,
     ReaderError(io::Error),
+    FailedToEncodeCharacter(cp1252::EncodingError),
     IncorrectHash(IncorrectHashError),
 }
 
@@ -36,6 +37,7 @@ impl fmt::Display for ReadError {
             Self::UnexpectedEndOfFile => write!(f, "Unexpected end of file"),
             Self::FailedToReadFileOffset => write!(f, "Failed to read file offset"),
             Self::ReaderError(_) => write!(f, "Error reading file"),
+            Self::FailedToEncodeCharacter(_) => write!(f, "Failed to encode character"),
             Self::IncorrectHash(err) => write!(
                 f,
                 "Incorrect hash for '{}' (expected {}, found {})",
@@ -61,6 +63,12 @@ impl From<io::Error> for ReadError {
         } else {
             Self::ReaderError(e)
         }
+    }
+}
+
+impl From<cp1252::EncodingError> for ReadError {
+    fn from(e: cp1252::EncodingError) -> Self {
+        Self::FailedToEncodeCharacter(e)
     }
 }
 
@@ -663,7 +671,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
         for folder_record in &mut folder_records {
             if res.archive_flags.include_directory_names {
                 let name = deserialize_bstring(data, true)?;
-                let computed_hash = hash::compute_hash(&name, hash::Type::Directory);
+                let computed_hash = hash::compute_hash(&name, hash::Type::Directory)?;
                 if computed_hash != folder_record.name_hash {
                     error!(
                         "Incorrect hash: calculated {:016x} instead of {:016x} for '{}'",
@@ -702,7 +710,7 @@ impl<R: io::Read + io::Seek> Bsa<R> {
             for folder_record in &mut folder_records {
                 for file_record in &mut folder_record.file_records {
                     let file_name = deserialize_null_terminated_string(data)?;
-                    let computed_hash = hash::compute_hash(&file_name, hash::Type::File);
+                    let computed_hash = hash::compute_hash(&file_name, hash::Type::File)?;
                     if computed_hash != file_record.name_hash {
                         error!(
                             "Incorrect hash: calculated {:016x} instead of {:016x} for '{}'",
