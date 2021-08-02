@@ -32,7 +32,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bsa = 0.1.0
+bsa = "0.1"
 ```
 
 Then use the library like this:
